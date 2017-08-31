@@ -233,7 +233,7 @@ def createOverridesTemplate(file, overrides = [], original_file = null) {
 
     p = entries(overrides)
     for (int i = 0; i < p.size(); i++) {
-        envString = "${envString}    ${p.get(i)[0]}: ${p.get(i)[1]}\n"
+        envString = "${envString}    ${p.get(i)[0]}: \"${p.get(i)[1]}\"\n"
     }
 
     echo("writing overrides to file:\n${envString}")
