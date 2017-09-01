@@ -666,7 +666,7 @@ def createOverridesTemplate(file, overrides = [], original_file = null) {
 * Parse and copy overrides to overrides.yml file
 *
 */
-def saltOverrides(overrides = []) {
+def initSaltOverrides(overrides = []) {
     def common = new com.mirantis.mk.Common()
     def salt_overrides_map = readYaml text: overrides
     print ("salt_overrides_map ${salt_overrides_map}")
