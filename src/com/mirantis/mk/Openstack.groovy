@@ -224,7 +224,7 @@ def createHeatStack(client, name, template, params = [], environment = null, pat
  * @param overrides   List of thr variable which have to be overriden
  * @param template    Template of overrides.yml
  */
-def createOverridesTemplate(file, overrides = [], original_file = null) {
+/* def createOverridesTemplate(file, overrides = [], original_file = null) {
     if (original_file) {
         envString = readFile file: original_file
     } else {
@@ -239,12 +239,12 @@ def createOverridesTemplate(file, overrides = [], original_file = null) {
     echo("writing overrides to file:\n${envString}")
     writeFile file: file, text: envString
 }
-
+*/
 /*
 * Parse and copy overrides to overrides.yml file
 *
 */
-def saltOverrides(overrides = []) {
+/* def saltOverrides(overrides = []) {
 
     def salt_overrides_map = readYaml text: overrides
     print ("salt_overrides_map ${salt_overrides_map}")
@@ -256,7 +256,7 @@ def saltOverrides(overrides = []) {
         
     createOverridesTemplate("${env.WORKSPACE}/template/env/_overrides.yml",salt_overrides_map,"${env.WORKSPACE}/template/env/_overrides_template.yml")    
 }
-
+*/
 /**
  * Returns list of stacks for stack name filter
  *
