@@ -668,6 +668,7 @@ def createOverridesTemplate(file, overrides = [], original_file = null) {
 */
 def initSaltOverrides(overrides = []) {
     def common = new com.mirantis.mk.Common()
+    if (overrides) {
     def salt_overrides_map = readYaml text: overrides
     print ("salt_overrides_map ${salt_overrides_map}")
         for (entry in common.entries(salt_overrides_map)) {
@@ -675,6 +676,6 @@ def initSaltOverrides(overrides = []) {
             def value = entry[1]
             echo("Set salt override ${key}=${value}")
         }
-        
+    }
     createOverridesTemplate("${env.WORKSPACE}/template/env/_overrides.yml",salt_overrides_map,"${env.WORKSPACE}/template/env/_overrides_template.yml")    
 }
