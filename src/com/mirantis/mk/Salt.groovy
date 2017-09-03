@@ -676,6 +676,9 @@ def initSaltOverrides(overrides = []) {
             def value = entry[1]
             echo("Set salt override ${key}=${value}")
         }
-    }
     createOverridesTemplate("${env.WORKSPACE}/template/env/_overrides.yml",salt_overrides_map,"${env.WORKSPACE}/template/env/_overrides_template.yml")    
+    } else {
+        createOverridesTemplate("${env.WORKSPACE}/template/env/_overrides.yml",overrides,"${env.WORKSPACE}/template/env/_overrides_template.yml")    
+    }    
+    
 }
