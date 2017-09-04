@@ -645,7 +645,7 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
  * @param overrides   List of thr variable which have to be overriden
  * @param template    Template of overrides.yml
  */
-def createOverridesTemplate(file, overrides = [], original_file = null) {
+/*def createOverridesTemplate(file, overrides = [], original_file = null) {
     def common = new com.mirantis.mk.Common()
     if (original_file) {
         envString = readFile file: original_file
@@ -661,12 +661,12 @@ def createOverridesTemplate(file, overrides = [], original_file = null) {
     echo("writing overrides to file:\n${file}")
     writeFile file: file, text: envString
 }
-
+*/
 /*
 * Parse and copy overrides to overrides.yml file
 *
 */
-def initSaltOverrides(overrides = []) {
+/*def initSaltOverrides(overrides = []) {
     def common = new com.mirantis.mk.Common()
     if (overrides) {
     def salt_overrides_map = readYaml text: overrides
@@ -681,4 +681,4 @@ def initSaltOverrides(overrides = []) {
         createOverridesTemplate("${env.WORKSPACE}/template/env/_overrides.yml",overrides,"${env.WORKSPACE}/template/env/_overrides_template.yml")    
     }    
     
-}
+}*/
