@@ -658,7 +658,7 @@ def createOverridesTemplate(file, overrides = [], original_file = null) {
         envString = "${envString}    ${p.get(i)[0]}: \"${p.get(i)[1]}\"\n"
     }
 
-    echo("writing overrides to file:\n${envString}")
+    echo("writing overrides to file:\n${file}")
     writeFile file: file, text: envString
 }
 
