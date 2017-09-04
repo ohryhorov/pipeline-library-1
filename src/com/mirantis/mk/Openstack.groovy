@@ -142,7 +142,7 @@ def createHeatEnv(file, environment = [], original_file = null) {
 
     p = entries(environment)
     for (int i = 0; i < p.size(); i++) {
-        def value=p.get(i)[1].replace("\\n", '#')
+        def value=p.get(i)[1].replace(':', '#')
         envString = "${envString}  ${p.get(i)[0]}: \"${value}\"\n"
     }
 
