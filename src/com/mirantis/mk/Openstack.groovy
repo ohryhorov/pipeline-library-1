@@ -142,7 +142,7 @@ def createHeatEnv(file, environment = [], original_file = null) {
 
     p = entries(environment)
     for (int i = 0; i < p.size(); i++) {
-        envString = "${envString}  ${p.get(i)[0]}: \"${p.get(i)[1]}.replace("\\n", "\\\n")\"\n"
+        envString = "${envString}  ${p.get(i)[0]}: \"${p.get(i)[1]}.replace('\\n', '\\\n')\"\n"
     }
 
     echo("writing to env file:\n${envString}")
