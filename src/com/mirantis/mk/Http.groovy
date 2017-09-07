@@ -97,7 +97,7 @@ def sendHttpRequest(url, method = 'GET', data = null, headers = [:], read_timeou
         if (read_timeout != -1){
             requestTimeOut = read_timeout*1000
             def response = httpRequest acceptType: 'APPLICATION_JSON', httpMode: "${httpMethod}", requestBody: "${dataStr}", url: "${url}", 
-                                        customHeaders: customHttpHeaders, timeout: "${requestTimeOut}"
+                                        customHeaders: customHttpHeaders, timeout: "${requestTimeOut}".toInteger()
             resp = response.getStatus()
             response_ = response.content
         } else {
