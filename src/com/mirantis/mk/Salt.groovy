@@ -56,9 +56,10 @@ def saltLogin(master) {
  * @param timeout  Additional argument salt api timeout
  * @param read_timeout http session read timeout
  */
-@NonCPS
+// @NonCPS
 def runSaltCommand(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1) {
     def http = new com.mirantis.mk.Http()
+    def openstack = new com.mirantis.mk.Openstack()
 
     data = [
         'tgt': target.expression,
@@ -88,7 +89,10 @@ def runSaltCommand(master, client, target, function, batch = null, args = null, 
       'X-Auth-Token': "${master.authToken}"
     ]
 
-    return http.sendHttpPostRequest("${master.url}/", data, headers, read_timeout)
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${target} ${function}"
+
+    //return http.sendHttpPostRequest("${master.url}/", data, headers, read_timeout)
+    return openstack.runOpenstackCommand(cmd, '', "${env.WORKSPACE}/venv")
 }
 
 /**
