@@ -45,7 +45,8 @@ def setupOpenstackVirtualenv(path, version = 'latest') {
     def openstack_latest_packages = [
         'python-openstackclient',
         'python-heatclient',
-        'docutils'
+        'docutils',
+        'salt-pepper'
     ]
 
     if (version == 'kilo') {
