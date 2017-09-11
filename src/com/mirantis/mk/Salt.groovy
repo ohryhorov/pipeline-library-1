@@ -89,10 +89,7 @@ def runSaltCommand(master, client, target, function, batch = null, args = null, 
       'X-Auth-Token': "${master.authToken}"
     ]
 
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
-
     return http.sendHttpPostRequest("${master.url}/", data, headers, read_timeout)
-    //return openstack.runOpenstackCommand(cmd, '', "${env.WORKSPACE}/venv")
 }
 
 /**
@@ -699,4 +696,41 @@ SALTAPI_PASS=${creds.password.toString()}
 """
     writeFile file: rcFile, text: rc
     return rcFile
+}
+
+def runSaltCommand_(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1) {
+    def http = new com.mirantis.mk.Http()
+    def openstack = new com.mirantis.mk.Openstack()
+
+    data = [
+        'tgt': target.expression,
+        'fun': function,
+        'client': client,
+        'expr_form': target.type,
+    ]
+
+    if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
+        data['client']= "local_batch"
+        data['batch'] = batch
+    }
+
+    if (args) {
+        data['arg'] = args
+    }
+
+    if (kwargs) {
+        data['kwarg'] = kwargs
+    }
+
+    if (timeout != -1) {
+        data['timeout'] = timeout
+    }
+
+    headers = [
+      'X-Auth-Token': "${master.authToken}"
+    ]
+
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
+
+    return openstack.runOpenstackCommand(cmd, '', "${env.WORKSPACE}/venv")
 }
