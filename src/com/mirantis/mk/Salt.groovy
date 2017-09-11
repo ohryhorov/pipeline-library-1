@@ -91,8 +91,8 @@ def runSaltCommand(master, client, target, function, batch = null, args = null, 
 
     cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
 
-    //return http.sendHttpPostRequest("${master.url}/", data, headers, read_timeout)
-    return openstack.runOpenstackCommand(cmd, '', "${env.WORKSPACE}/venv")
+    return http.sendHttpPostRequest("${master.url}/", data, headers, read_timeout)
+    //return openstack.runOpenstackCommand(cmd, '', "${env.WORKSPACE}/venv")
 }
 
 /**
