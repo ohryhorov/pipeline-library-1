@@ -682,3 +682,17 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
     }    
     
 }*/
+
+def createPepperEnv(url, credentialsId) {
+    def common = new com.mirantis.mk.Common()
+    rcFile = "${env.WORKSPACE}/pepperrc"
+    creds = common.getPasswordCredentials(credentialsId)
+    rc = """[main]
+SALTAPI_EAUTH=pam
+SALTAPI_URL=${url}
+SALTAPI_USER=${creds.username}
+SALTAPI_PASS=${creds.password.toString()}
+"""
+    writeFile file: rcFile, text: rc
+    return rcFile
+}
