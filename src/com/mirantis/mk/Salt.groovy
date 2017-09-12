@@ -709,7 +709,7 @@ def setSaltOverrides_(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
 //         runSaltProcessStep_(master, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
 
 //         runSaltProcessStep_(master, tgt, fun, arg = [], batch = null, output = false, timeout = -1)
-         runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1)
+         runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1, true)
 //         runSaltCommand_(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
 
     }
@@ -776,7 +776,7 @@ SALTAPI_PASS=${creds.password.toString()}
     return rcFile
 }
 
-def runSaltCommand_(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1) {
+def runSaltCommand_(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1, overrides = false) {
     def http = new com.mirantis.mk.Http()
     def openstack = new com.mirantis.mk.Openstack()
     def cmd
@@ -799,11 +799,20 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
     }
 
     cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
-    
-    if (args) {
-        data['arg'] = args
-        cmd = cmd + " \"" + args.join(',') + "\""
+
+    if (overrides) {
+        if (args) {
+            data['arg'] = args
+            cmd = cmd + " \"" + args.join(' ') + "\""
+        }
+
+    } else {
+        if (args) {
+            data['arg'] = args
+            cmd = cmd + " \"" + args.join(',') + "\""
+        }
     }
+
 
     if (kwargs) {
         data['kwarg'] = kwargs
