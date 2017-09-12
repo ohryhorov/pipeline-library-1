@@ -771,7 +771,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
 
     if (args) {
         data['arg'] = args
-        cmd = cmd + " " + args.toString()
+        cmd = cmd + " " + args.join(',')
     }
 
     if (kwargs) {
