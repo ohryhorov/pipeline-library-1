@@ -696,6 +696,20 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
     runSaltProcessStep(master, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
 }
 
+def setSaltOverrides_(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
+    def common = new com.mirantis.mk.Common()
+    def salt_overrides_map = readYaml text: salt_overrides
+    for (entry in common.entries(salt_overrides_map)) {
+         def key = entry[0]
+         def value = entry[1]
+
+         common.debugMsg("Set salt override ${key}=${value}")
+         runSaltProcessStep_(master, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
+    }
+    runSaltProcessStep_(master, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
+}
+
+
 /**
  * Create OpenStack environment file
  *
@@ -760,7 +774,6 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
     def openstack = new com.mirantis.mk.Openstack()
     def cmd
     def cmd_client
-    //def output = [:]
 
     data = [
         'tgt': target.expression,
@@ -787,7 +800,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
 
     if (kwargs) {
         data['kwarg'] = kwargs
-        cmd = cmd + " kwarg " + kwarg.join(',')
+        cmd = cmd + " \"" + kwarg.join(',') + "\""
     }
 
     if (timeout != -1) {
