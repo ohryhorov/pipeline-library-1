@@ -163,6 +163,35 @@ def enforceState(master, target, state, output = true, failOnError = true, batch
     }
 }
 
+def enforceState_(master, target, state, output = true, failOnError = true, batch = null, optional = false, read_timeout=-1, retries=-1) {
+    def common = new com.mirantis.mk.Common()
+    def run_states
+
+    if (state instanceof String) {
+        run_states = state
+    } else {
+        run_states = state.join(',')
+    }
+
+    common.infoMsg("Running state ${run_states} on ${target}")
+    def out
+
+    if (optional == false || testTarget(master, target)){
+        if (retries != -1){
+            retry(retries){
+                out = runSaltCommand_(master, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, [run_states], null, -1, read_timeout)
+            }
+            }
+        else {
+            out = runSaltCommand_(master, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, [run_states], null, -1, read_timeout)
+        }
+        checkResult(out, failOnError, output)
+        return out
+    } else {
+        common.infoMsg("No Minions matched the target given, but 'optional' param was set to true - Pipeline continues. ")
+    }
+}
+
 /**
  * Run command on salt minion (salt cmd.run wrapper)
  * @param master Salt connection object
@@ -480,6 +509,25 @@ def runSaltProcessStep(master, tgt, fun, arg = [], batch = null, output = false,
     return out
 }
 
+def runSaltProcessStep_(master, tgt, fun, arg = [], batch = null, output = false, timeout = -1) {
+    def common = new com.mirantis.mk.Common()
+    def salt = new com.mirantis.mk.Salt()
+    def out
+
+    common.infoMsg("Running step ${fun} ${arg} on ${tgt}")
+
+    if (batch == true) {
+        out = runSaltCommand(master, 'local_batch', ['expression': tgt, 'type': 'compound'], fun, String.valueOf(batch), arg, null, timeout)
+    } else {
+        out = runSaltCommand(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
+    }
+
+    if (output == true) {
+        salt.printSaltCommandResult(out)
+    }
+    return out
+}
+
 /**
  * Check result for errors and throw exception if any found
  *
@@ -701,6 +749,8 @@ SALTAPI_PASS=${creds.password.toString()}
 def runSaltCommand_(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1) {
     def http = new com.mirantis.mk.Http()
     def openstack = new com.mirantis.mk.Openstack()
+    def cmd
+    def cmd_client
 
     data = [
         'tgt': target.expression,
@@ -709,21 +759,29 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
         'expr_form': target.type,
     ]
 
+    cmd = "-C ${target.expression} "
+    cmd_client = "--client ${client}"
+
     if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
         data['client']= "local_batch"
         data['batch'] = batch
+
+        cmd_client = "--client local_batch --batch ${batch}"
     }
 
     if (args) {
         data['arg'] = args
+        cmd = cmd + " arg ${args}"
     }
 
     if (kwargs) {
         data['kwarg'] = kwargs
+        cmd = cmd + " kwarg ${kwarg}"
     }
 
     if (timeout != -1) {
         data['timeout'] = timeout
+        cmd = cmd + " --timout ${timeout}"
     }
 
     headers = [
