@@ -29,7 +29,7 @@ def connection(url, credentialsId = "salt") {
 def connection_(url, credentialsId = "salt", pepper = null) {
     def common = new com.mirantis.mk.Common()
     if (pepper) {
-        runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'test.ping', false, '', true, -1, -1)
+        runSaltCommand_('', 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'test.ping', false, '', true, -1, -1)
 
         params = 'token'
 
