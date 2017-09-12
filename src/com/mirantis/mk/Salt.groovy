@@ -782,7 +782,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
     
     if (args) {
         data['arg'] = args
-        cmd = cmd + " " + args.join(',')
+        cmd = cmd + " \" + args.join(',') + "\""
     }
 
     if (kwargs) {
@@ -801,7 +801,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
 
     //cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
     println("cmd: ${cmd}")
-    println("expr_form: ${data['expr_form']}")
+    //println("expr_form: ${data['expr_form']}")
     //output = runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
     //println("output: ${output}")
     
