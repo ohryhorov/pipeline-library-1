@@ -709,7 +709,8 @@ def setSaltOverrides_(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
 //         runSaltProcessStep_(master, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
 
 //         runSaltProcessStep_(master, tgt, fun, arg = [], batch = null, output = false, timeout = -1)
-         runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1, true)
+         runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1, -1, true)
+
 //         runSaltCommand_(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
 
     }
