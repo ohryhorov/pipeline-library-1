@@ -26,6 +26,26 @@ def connection(url, credentialsId = "salt") {
     return params
 }
 
+def connection_(url, credentialsId = "salt", pepper = null) {
+    def common = new com.mirantis.mk.Common()
+    if (pepper) {
+        runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'test.ping', false, '', true, -1, -1)
+
+        params = 'token'
+
+    } else {
+        params = [
+            "url": url,
+            "credentialsId": credentialsId,
+            "authToken": null,
+            "creds": common.getCredentials(credentialsId)
+        ]
+        params["authToken"] = saltLogin(params)
+    }
+
+    return params
+}
+
 /**
  * Login to Salt API, return auth token
  *
@@ -705,14 +725,7 @@ def setSaltOverrides_(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
          def value = entry[1]
 
          common.debugMsg("Set salt override ${key}=${value}")
-         
-//         runSaltProcessStep_(master, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
-
-//         runSaltProcessStep_(master, tgt, fun, arg = [], batch = null, output = false, timeout = -1)
          runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1, -1, true)
-
-//         runSaltCommand_(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
-
     }
     runSaltProcessStep_(master, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
 }
@@ -799,7 +812,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
         cmd_client = "--client local_batch --batch ${batch}"
     }
 
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
+    cmd = "pepper -T -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
 
     if (overrides) {
         if (args) {
@@ -825,15 +838,12 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
         cmd = cmd + " --timout ${timeout}"
     }
 
-    headers = [
-      'X-Auth-Token': "${master.authToken}"
-    ]
+//    headers = [
+//      'X-Auth-Token': "${master.authToken}"
+//    ]
 
-    //cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
     println("cmd: ${cmd}")
     //println("expr_form: ${data['expr_form']}")
-    //output = runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
-    //println("output: ${output}")
     
     //return output
     return runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
