@@ -31,8 +31,9 @@ def connection_(url, credentialsId = "salt", pepper = null) {
     if (pepper) {
         def cmd = "pepper -T -c ${env.WORKSPACE}/pepperrc --client local -C \"I@salt:master\" test.ping"
         runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
-        def peppercache = readJSON file: '~/.peppercache'
-        println("${peppercache}")
+        def peppercache = new File('~/.peppercache')
+        InputJSON = new JsonSlurper().parseText(peppercache.text)
+        println("${InputJSON}")
         params = 'token'
 
     } else {
