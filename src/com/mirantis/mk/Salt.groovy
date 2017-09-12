@@ -32,7 +32,8 @@ def connection_(url, credentialsId = "salt", pepper = null) {
         def cmd = "pepper -T -c ${env.WORKSPACE}/pepperrc --client local -C \"I@salt:master\" test.ping"
         runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
         def peppercache = new File('~/.peppercache')
-        InputJSON = new JsonSlurper().parseText(peppercache.text)
+        //InputJSON = groovy.json.JsonSlurper().parseText(peppercache.text)
+        InputJSON = groovy.json.JsonSlurperClassic().parseText(peppercache)
         println("${InputJSON}")
         params = 'token'
 
