@@ -791,7 +791,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
     //cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
     println("cmd: ${cmd}")
 
-    return JSONObject JSON.parse(runPepperCommand(cmd, '', "${env.WORKSPACE}/venv"))
+    return JSON.parse(runPepperCommand(cmd, '', "${env.WORKSPACE}/venv"))
 }
 
 def runPepperCommand(cmd, venv, path = null) {
