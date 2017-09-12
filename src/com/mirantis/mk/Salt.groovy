@@ -776,7 +776,7 @@ SALTAPI_PASS=${creds.password.toString()}
     return rcFile
 }
 
-def runSaltCommand_(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1, overrides = false) {
+def runSaltCommand_(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1, overrides = null) {
     def http = new com.mirantis.mk.Http()
     def openstack = new com.mirantis.mk.Openstack()
     def cmd
