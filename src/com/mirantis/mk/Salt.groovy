@@ -431,6 +431,11 @@ def getMinions(master, target) {
     return new ArrayList<String>(minionsRaw['return'][0].keySet())
 }
 
+def getMinions_(master, target) {
+    def minionsRaw = runSaltCommand_(master, 'local', ['expression': target, 'type': 'compound'], 'test.ping')
+    return new ArrayList<String>(minionsRaw['return'][0].keySet())
+}
+
 
 /**
  * Test if there are any minions to target
@@ -441,6 +446,10 @@ def getMinions(master, target) {
 
 def testTarget(master, target) {
     return getMinions(master, target).size() > 0
+}
+
+def testTarget_(master, target) {
+    return getMinions_(master, target).size() > 0
 }
 
 /**
@@ -760,7 +769,6 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
         'expr_form': target.type,
     ]
 
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C \"${target.expression}\" ${function}"
     cmd_client = "--client ${client}"
 
     if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
@@ -770,6 +778,8 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
         cmd_client = "--client local_batch --batch ${batch}"
     }
 
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
+    
     if (args) {
         data['arg'] = args
         cmd = cmd + " " + args.join(',')
@@ -791,6 +801,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
 
     //cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
     println("cmd: ${cmd}")
+    println("expr_form: ${data['expr_form']}")
     //output = runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
     //println("output: ${output}")
     
