@@ -759,7 +759,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
         'expr_form': target.type,
     ]
 
-    cmd = "-C ${target.expression} "
+    cmd = "-C ${target.expression} ${function}"
     cmd_client = "--client ${client}"
 
     if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
@@ -788,7 +788,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
       'X-Auth-Token': "${master.authToken}"
     ]
 
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
+    //cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
 
     return openstack.runOpenstackCommand(cmd, '', "${env.WORKSPACE}/venv")
 }
