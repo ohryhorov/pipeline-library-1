@@ -709,7 +709,8 @@ def setSaltOverrides_(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
 //         runSaltProcessStep_(master, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
 
 //         runSaltProcessStep_(master, tgt, fun, arg = [], batch = null, output = false, timeout = -1)
-         runSaltCommand_(master, 'local', 'expression': 'I@salt:master', 'type': 'compound'], fun, batch, "${key} ${value}", null, -1)
+         runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], fun, batch, "${key} ${value}", null, -1)
+//         runSaltCommand_(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
 
     }
     runSaltProcessStep_(master, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
