@@ -759,7 +759,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
         'expr_form': target.type,
     ]
 
-    cmd = "-C ${target.expression} ${function}"
+    cmd = "pepper -C ${target.expression} ${function}"
     cmd_client = "--client ${client}"
 
     if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
@@ -771,7 +771,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
 
     if (args) {
         data['arg'] = args
-        cmd = cmd + " arg ${args}"
+        cmd = cmd + " ${args}"
     }
 
     if (kwargs) {
