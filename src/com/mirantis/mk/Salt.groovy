@@ -810,5 +810,5 @@ def runPepperCommand(cmd, venv, path = null) {
             returnStdout: true
         ).trim()
     }
-    return output
+    return new groovy.json.JsonSlurperClassic().parseText(output)
 }
