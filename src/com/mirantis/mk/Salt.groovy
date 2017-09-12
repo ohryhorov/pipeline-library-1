@@ -801,7 +801,7 @@ def runPepperCommand(cmd, venv, path = null) {
     def python = new com.mirantis.mk.Python()
     pepperCmd = ". ${venv}; ${cmd}"
     if (path) {
-        output = python.runVirtualenvCommand(path, openstackCmd)
+        output = python.runVirtualenvCommand(path, pepperCmd)
     }
     else {
         echo("[Command]: ${pepperCmd}")
