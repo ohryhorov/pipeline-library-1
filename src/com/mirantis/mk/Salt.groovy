@@ -789,6 +789,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
     ]
 
     //cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
+    printlf ("cmd: ${cmd}")
 
     return openstack.runOpenstackCommand(cmd, '', "${env.WORKSPACE}/venv")
 }
