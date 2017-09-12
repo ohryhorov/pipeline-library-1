@@ -751,7 +751,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
     def openstack = new com.mirantis.mk.Openstack()
     def cmd
     def cmd_client
-    def output = [:]
+    //def output = [:]
 
     data = [
         'tgt': target.expression,
@@ -760,7 +760,7 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
         'expr_form': target.type,
     ]
 
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function}"
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C \"${target.expression}\" ${function}"
     cmd_client = "--client ${client}"
 
     if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
@@ -791,10 +791,11 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
 
     //cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
     println("cmd: ${cmd}")
-    output = runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
-    println("output: ${output}")
+    //output = runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
+    //println("output: ${output}")
     
-    return output
+    //return output
+    return runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
 }
 
 def runPepperCommand(cmd, venv, path = null) {
