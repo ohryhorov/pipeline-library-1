@@ -16,14 +16,28 @@ def setupVirtualEnv(venv_path = 'aws_venv') {
     python.setupVirtualenv(venv_path, 'python2', requirements)
 }
 
-def getEnvVars(credentials_id, region = 'us-west-2') {
+def getEnvVars(credentials, region = 'us-west-2') {
     def common = new com.mirantis.mk.Common()
 
-    def creds = common.getCredentials(credentials_id)
+    def creds
+    def username
+    def password
+
+    if (credentials.contains(':')) {
+        // we have key and secret in string (delimited by :)
+        creds = credentials.tokenize(':')
+        username = creds[0]
+        password = creds[1]
+    } else {
+        // we have creadentials_id
+        creds = common.getCredentials(credentials)
+        username = creds.username
+        password = creds.password
+    }
 
     return [
-        "AWS_ACCESS_KEY_ID=${creds.username}",
-        "AWS_SECRET_ACCESS_KEY=${creds.password}",
+        "AWS_ACCESS_KEY_ID=${username}",
+        "AWS_SECRET_ACCESS_KEY=${password}",
         "AWS_DEFAULT_REGION=${region}"
     ]
 }
@@ -38,7 +52,7 @@ def getEnvVars(credentials_id, region = 'us-west-2') {
 def createStack(venv_path, env_vars, template_file, stack_name, parameters = []) {
     def python = new com.mirantis.mk.Python()
 
-    def cmd = "aws cloudformation create-stack --stack-name ${stack_name} --template-body file://template/${template_file}"
+    def cmd = "aws cloudformation create-stack --stack-name ${stack_name} --template-body file://template/${template_file} --capabilities CAPABILITY_NAMED_IAM"
 
     if (parameters != null && parameters.size() > 0) {
         cmd = "${cmd} --parameters"
@@ -72,10 +86,26 @@ def describeStack(venv_path, env_vars, stack_name) {
     withEnv(env_vars) {
         def out = python.runVirtualenvCommand(venv_path, cmd)
         def out_json = common.parseJSON(out)
-        def stack_info = out_json['Stacks'][0]
-        common.prettyPrint(stack_info)
+        def resources = out_json['Stacks'][0]
+        common.prettyPrint(resources)
 
-        return stack_info
+        return resources
+    }
+}
+
+def describeStackResources(venv_path, env_vars, stack_name) {
+    def python = new com.mirantis.mk.Python()
+    def common = new com.mirantis.mk.Common()
+
+    def cmd = "aws cloudformation describe-stack-resources --stack-name ${stack_name}"
+
+    withEnv(env_vars) {
+        def out = python.runVirtualenvCommand(venv_path, cmd)
+        def out_json = common.parseJSON(out)
+        def resources = out_json['StackResources']
+        common.prettyPrint(resources)
+
+        return resources
     }
 }
 
@@ -103,6 +133,9 @@ def waitForStatus(venv_path, env_vars, stack_name, state, state_failed = [], max
                     throw new Exception("Stack ${stack_name} in in failed state")
                 }
 
+                // print stack resources
+                aws.describeStackResources(venv_path, env_vars, stack_name)
+
                 // wait for next loop
                 sleep(loop_sleep)
             }
@@ -113,7 +146,7 @@ def waitForStatus(venv_path, env_vars, stack_name, state, state_failed = [], max
 def getOutputs(venv_path, env_vars, stack_name, key = '') {
     def aws = new com.mirantis.mk.Aws()
     def common = new com.mirantis.mk.Common()
-    def output = {}
+    def output = [:]
 
     def stack_info = aws.describeStack(venv_path, env_vars, stack_name)
     common.prettyPrint(stack_info)

@@ -509,17 +509,15 @@ def systestCalico(nodeImage, ctlImage, failOnErrors = true) {
       """
       // execute systests against calico/node
       sh """
-        cd calico_home
+        cd calico_home/calico_node
         NODE_CONTAINER_NAME=${nodeImage} make st
       """
     } catch (Exception e) {
-      sh "make stop-etcd"
-      // FIXME: cleaning has to be done by make stop/clean targets
       sh """
-        for dc in calico-felix cali-st-ext-nginx cali-st-host cali-st-gw host1 host2 host3; do
-          docker rm -f "\${dc}" || :
-        done
-      """
+        cd calico_home/calico_node
+        make stop-etcd
+        make clean
+        """
       if (failOnErrors) {
         throw e
       }

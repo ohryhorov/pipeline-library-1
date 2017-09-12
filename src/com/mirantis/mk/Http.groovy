@@ -15,7 +15,7 @@ package com.mirantis.mk
  * @param read_timeout http session read timeout
  */
 @NonCPS
-def sendHttpRequestOriginal(url, method = 'GET', data = null, headers = [:], read_timeout=-1) {
+def sendHttpRequest(url, method = 'GET', data = null, headers = [:], read_timeout=-1) {
     def connection = new URL(url).openConnection()
 
     if (read_timeout != -1){
@@ -70,65 +70,6 @@ def sendHttpRequestOriginal(url, method = 'GET', data = null, headers = [:], rea
     }
 }
 
-def sendHttpRequest(url, method = 'GET', data = null, headers = [:], read_timeout=-1) {
-    if (method != 'GET') {
-        httpMethod = "${method}"
-    } else {
-        httpMethod = 'GET'
-    }
-    def customHttpHeaders = [[$class: 'HttpRequestNameValuePair', name: 'User-Agent', value: 'jenkins-groovy']]
-    if (data) {
-        customHttpHeaders.add([$class: 'HttpRequestNameValuePair', name: 'Content-Type', value: 'application/json'])
-    }
-    for (header in headers) {
-        customHttpHeaders.add([$class: 'HttpRequestNameValuePair', name: "${header.key}", value: "${header.value}"])
-    }    
-    
-//    println customHttpHeaders
-    if (data) {
-        dataStr = new groovy.json.JsonBuilder(data).toString()
-
-        if(env.getEnvironment().containsKey('DEBUG') && env['DEBUG'] == "true"){
-            println("[HTTP] Request URL: ${url}, method: ${method}, headers: ${headers}, content: ${dataStr}")
-        }
-
-//        println("method: ${url}")
-
-        if (read_timeout != -1){
-            requestTimeOut = read_timeout*1000
-            def response = httpRequest acceptType: 'APPLICATION_JSON', httpMode: "${httpMethod}", requestBody: "${dataStr}", url: "${url}", 
-                                        customHeaders: customHttpHeaders, timeout: "${requestTimeOut}".toInteger()
-            resp = response.getStatus()
-            response_ = response.content
-        } else {
-            def response = httpRequest acceptType: 'APPLICATION_JSON', httpMode: "${httpMethod}", requestBody: "${dataStr}", url: "${url}", 
-                                        customHeaders: customHttpHeaders
-            resp = response.getStatus()
-            response_ = response.content
-        }
-    }
-
-    //def resp = response.getStatus()
-
-    if ( resp == 200 ) {
-        try {
-            response_content = new groovy.json.JsonSlurperClassic().parseText(response_)
-        } catch (groovy.json.JsonException e) {
-            response_content = response_
-        }
-        if(env.getEnvironment().containsKey('DEBUG') && env['DEBUG'] == "true"){
-            println("[HTTP] Response: code ${resp}")
-        }
-//        println("response: ${response_content}")
-        return response_content
-    } else {
-        if(env.getEnvironment().containsKey('DEBUG') && env['DEBUG'] == "true"){
-            println("[HTTP] Response: code ${connection.responseCode}")
-        }
-        throw new Exception(connection.responseCode + ": " + connection.inputStream.text)
-    } 
-}
-
 /**
  * Make HTTP GET request
  *
@@ -179,7 +120,7 @@ def sendHttpDeleteRequest(url, data = null, headers = [:]) {
  * @param data      JSON data to POST or PUT
  * @param headers   Map of additional request headers
  */
-def restCallOriginal(master, uri, method = 'GET', data = null, headers = [:]) {
+def restCall(master, uri, method = 'GET', data = null, headers = [:]) {
     def connection = new URL("${master.url}${uri}").openConnection()
     if (method != 'GET') {
         connection.setRequestMethod(method)
@@ -219,47 +160,6 @@ def restCallOriginal(master, uri, method = 'GET', data = null, headers = [:]) {
     } else {
         throw new Exception(connection.responseCode + ": " + connection.inputStream.text)
     }
-}
-
-def restCall(master, uri, method = 'GET', data = null, headers = [:]) {
-//    if (method != 'GET') {
-//        connection.setRequestMethod(method)
-//    }
-
-    def customHttpHeaders = [[$class: 'HttpRequestNameValuePair', name: 'User-Agent', value: 'jenkins-groovy']]
-    if (master.authToken) {
-        // XXX: removeme
-        customHttpHeaders.add([$class: 'HttpRequestNameValuePair', name: 'X-Auth-Token', value: "${master.authToken}"])
-    }
-    for (header in headers) {
-        customHttpHeaders.add([$class: 'HttpRequestNameValuePair', name: "${header.key}", value: "${header.value}"])
-    }
-    
-//    println customHttpHeaders
-    if (data) {
-        if (data instanceof String) {
-            dataStr = data
-        } else {
-//            customHttpHeaders.add([$class: 'HttpRequestNameValuePair', name: 'Content-Type', value: 'application/json'])    
-            dataStr = new groovy.json.JsonBuilder(data).toString()
-        }
-
-        def response = httpRequest acceptType: 'APPLICATION_JSON', contentType: 'APPLICATION_JSON', httpMode: 'POST', requestBody: "${dataStr}", url: "${master.url}${uri}", 
-                                    customHeaders: customHttpHeaders
-
-        def resp = response.getStatus()
-        if ( resp >= 200 && resp < 300 ) {
-            println("Content: "+response.content)
-            try {
-                return new groovy.json.JsonSlurperClassic().parseText(response.content)
-            } catch (Exception e) {
-                return response.content
-            }
-        } else {
-            throw new Exception(resp + ": " + dataStr)
-        }
-    }
-
 }
 
 /**

@@ -13,7 +13,7 @@ import java.util.stream.Collectors
  * @param url                 Salt API server URL
  * @param credentialsID       ID of credentials store entry
  */
-def connection(url, credentialsId = "salt") {
+def connection(url, credentialsId = "salt", pepper = null) {
     def common = new com.mirantis.mk.Common()
     params = [
         "url": url,
@@ -21,21 +21,6 @@ def connection(url, credentialsId = "salt") {
         "authToken": null,
         "creds": common.getCredentials(credentialsId)
     ]
-    params["authToken"] = saltLogin(params)
-
-    return params
-}
-
-def connection_(url, credentialsId = "salt", pepper = null) {
-    def common = new com.mirantis.mk.Common()
-
-    params = [
-        "url": url,
-        "credentialsId": credentialsId,
-        "authToken": null,
-        "creds": common.getCredentials(credentialsId)
-    ]
-
     if (pepper) {
         params["authToken"] = 'salt-pepper'
     } else {
@@ -78,7 +63,8 @@ def saltLogin(master) {
 @NonCPS
 def runSaltCommand(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1) {
     def http = new com.mirantis.mk.Http()
-    def openstack = new com.mirantis.mk.Openstack()
+    def cmd
+    def cmd_client
 
     data = [
         'tgt': target.expression,
@@ -86,29 +72,40 @@ def runSaltCommand(master, client, target, function, batch = null, args = null, 
         'client': client,
         'expr_form': target.type,
     ]
+ 
+    cmd_client = "--client ${client}"
 
     if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
         data['client']= "local_batch"
         data['batch'] = batch
+        cmd_client = "--client local_batch --batch ${batch}"
     }
+    cmd = "pepper -T -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
 
     if (args) {
         data['arg'] = args
+        cmd = cmd + " \"" + args.join(',') + "\""
     }
 
     if (kwargs) {
         data['kwarg'] = kwargs
+        cmd = cmd + " \"" + kwarg.join(',') + "\""
     }
 
     if (timeout != -1) {
         data['timeout'] = timeout
+        cmd = cmd + " --timout ${timeout}"
     }
 
     headers = [
       'X-Auth-Token': "${master.authToken}"
     ]
 
-    return http.sendHttpPostRequest("${master.url}/", data, headers, read_timeout)
+    if (master.authToken == 'salt-pepper') {
+        return runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
+    } else {
+        return http.sendHttpPostRequest("${master.url}/", data, headers, read_timeout)
+    }
 }
 
 /**
@@ -174,35 +171,6 @@ def enforceState(master, target, state, output = true, failOnError = true, batch
             }
         else {
             out = runSaltCommand(master, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, [run_states], null, -1, read_timeout)
-        }
-        checkResult(out, failOnError, output)
-        return out
-    } else {
-        common.infoMsg("No Minions matched the target given, but 'optional' param was set to true - Pipeline continues. ")
-    }
-}
-
-def enforceState_(master, target, state, output = true, failOnError = true, batch = null, optional = false, read_timeout=-1, retries=-1) {
-    def common = new com.mirantis.mk.Common()
-    def run_states
-
-    if (state instanceof String) {
-        run_states = state
-    } else {
-        run_states = state.join(',')
-    }
-
-    common.infoMsg("Running state ${run_states} on ${target}")
-    def out
-
-    if (optional == false || testTarget(master, target)){
-        if (retries != -1){
-            retry(retries){
-                out = runSaltCommand_(master, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, [run_states], null, -1, read_timeout)
-            }
-            }
-        else {
-            out = runSaltCommand_(master, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, [run_states], null, -1, read_timeout)
         }
         checkResult(out, failOnError, output)
         return out
@@ -450,11 +418,6 @@ def getMinions(master, target) {
     return new ArrayList<String>(minionsRaw['return'][0].keySet())
 }
 
-def getMinions_(master, target) {
-    def minionsRaw = runSaltCommand_(master, 'local', ['expression': target, 'type': 'compound'], 'test.ping')
-    return new ArrayList<String>(minionsRaw['return'][0].keySet())
-}
-
 
 /**
  * Test if there are any minions to target
@@ -465,10 +428,6 @@ def getMinions_(master, target) {
 
 def testTarget(master, target) {
     return getMinions(master, target).size() > 0
-}
-
-def testTarget_(master, target) {
-    return getMinions_(master, target).size() > 0
 }
 
 /**
@@ -518,7 +477,7 @@ def orchestrateSystem(master, target, orchestrate) {
  * @param timeout  Additional argument salt api timeout
  * @return output of salt command
  */
-def runSaltProcessStep(master, tgt, fun, arg = [], batch = null, output = false, timeout = -1) {
+def runSaltProcessStep(master, tgt, fun, arg = [], batch = null, output = false, timeout = -1, kwargs = null) {
     def common = new com.mirantis.mk.Common()
     def salt = new com.mirantis.mk.Salt()
     def out
@@ -526,28 +485,9 @@ def runSaltProcessStep(master, tgt, fun, arg = [], batch = null, output = false,
     common.infoMsg("Running step ${fun} ${arg} on ${tgt}")
 
     if (batch == true) {
-        out = runSaltCommand(master, 'local_batch', ['expression': tgt, 'type': 'compound'], fun, String.valueOf(batch), arg, null, timeout)
+        out = runSaltCommand(master, 'local_batch', ['expression': tgt, 'type': 'compound'], fun, String.valueOf(batch), arg, kwargs, timeout)
     } else {
-        out = runSaltCommand(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
-    }
-
-    if (output == true) {
-        salt.printSaltCommandResult(out)
-    }
-    return out
-}
-
-def runSaltProcessStep_(master, tgt, fun, arg = [], batch = null, output = false, timeout = -1) {
-    def common = new com.mirantis.mk.Common()
-    def salt = new com.mirantis.mk.Salt()
-    def out
-
-    common.infoMsg("Running step ${fun} ${arg} on ${tgt}")
-
-    if (batch == true) {
-        out = runSaltCommand_(master, 'local_batch', ['expression': tgt, 'type': 'compound'], fun, String.valueOf(batch), arg, null, timeout)
-    } else {
-        out = runSaltCommand_(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
+        out = runSaltCommand(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, kwargs, timeout)
     }
 
     if (output == true) {
@@ -715,138 +655,14 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
     runSaltProcessStep(master, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
 }
 
-def setSaltOverrides_(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
-    def common = new com.mirantis.mk.Common()
-    def salt_overrides_map = readYaml text: salt_overrides
-    println("salt_overrides_map: ${salt_overrides_map}")
-    for (entry in common.entries(salt_overrides_map)) {
-         def key = entry[0]
-         def value = entry[1]
-
-         common.debugMsg("Set salt override ${key}=${value}")
-         runSaltCommand_(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1, -1, true)
-    }
-    runSaltProcessStep_(master, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
-}
-
-
 /**
- * Create OpenStack environment file
- *
- * @param file        Resulted file will be copied to VM to override the variables
- * @param overrides   List of thr variable which have to be overriden
- * @param template    Template of overrides.yml
- */
-/*def createOverridesTemplate(file, overrides = [], original_file = null) {
-    def common = new com.mirantis.mk.Common()
-    if (original_file) {
-        envString = readFile file: original_file
-    } else {
-        envString = "parameters:\n  _param:\n"
-    }
-
-    p = common.entries(overrides)
-    for (int i = 0; i < p.size(); i++) {
-        envString = "${envString}    ${p.get(i)[0]}: \"${p.get(i)[1]}\"\n"
-    }
-
-    echo("writing overrides to file:\n${file}")
-    writeFile file: file, text: envString
-}
-*/
-/*
-* Parse and copy overrides to overrides.yml file
+* Execute salt commands via salt-api with  
+* CLI client salt-pepper
 *
+* @param cmd    Salt command
+* @param venv   Environmental parameters
+* @param path   Path to virtualenv
 */
-/*def initSaltOverrides(overrides = []) {
-    def common = new com.mirantis.mk.Common()
-    if (overrides) {
-    def salt_overrides_map = readYaml text: overrides
-    print ("salt_overrides_map ${salt_overrides_map}")
-        for (entry in common.entries(salt_overrides_map)) {
-            def key = entry[0]
-            def value = entry[1]
-            echo("Set salt override ${key}=${value}")
-        }
-    createOverridesTemplate("${env.WORKSPACE}/template/env/_overrides.yml",salt_overrides_map,"${env.WORKSPACE}/template/env/_overrides_template.yml")    
-    } else {
-        createOverridesTemplate("${env.WORKSPACE}/template/env/_overrides.yml",overrides,"${env.WORKSPACE}/template/env/_overrides_template.yml")    
-    }    
-    
-}*/
-
-def createPepperEnv(url, credentialsId) {
-    def common = new com.mirantis.mk.Common()
-    rcFile = "${env.WORKSPACE}/pepperrc"
-    creds = common.getPasswordCredentials(credentialsId)
-    rc = """[main]
-SALTAPI_EAUTH=pam
-SALTAPI_URL=${url}
-SALTAPI_USER=${creds.username}
-SALTAPI_PASS=${creds.password.toString()}
-"""
-    writeFile file: rcFile, text: rc
-    return rcFile
-}
-
-def runSaltCommand_(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1, overrides = null) {
-    def http = new com.mirantis.mk.Http()
-    def openstack = new com.mirantis.mk.Openstack()
-    def cmd
-    def cmd_client
-
-    data = [
-        'tgt': target.expression,
-        'fun': function,
-        'client': client,
-        'expr_form': target.type,
-    ]
-
-    cmd_client = "--client ${client}"
-
-    if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
-        data['client']= "local_batch"
-        data['batch'] = batch
-
-        cmd_client = "--client local_batch --batch ${batch}"
-    }
-
-    cmd = "pepper -T -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
-
-    if (overrides) {
-        if (args) {
-            data['arg'] = args
-            cmd = cmd + " \"" + args.join(' ') + "\""
-        }
-
-    } else {
-        if (args) {
-            data['arg'] = args
-            cmd = cmd + " \"" + args.join(',') + "\""
-        }
-    }
-
-
-    if (kwargs) {
-        data['kwarg'] = kwargs
-        cmd = cmd + " \"" + kwarg.join(',') + "\""
-    }
-
-    if (timeout != -1) {
-        data['timeout'] = timeout
-        cmd = cmd + " --timout ${timeout}"
-    }
-
-//    headers = [
-//      'X-Auth-Token': "${master.authToken}"
-//    ]
-
-    println("cmd: ${cmd}")
-    //println("expr_form: ${data['expr_form']}")
-    
-    //return output
-    return runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
-}
 
 def runPepperCommand(cmd, venv, path = null) {
     def python = new com.mirantis.mk.Python()
@@ -862,4 +678,26 @@ def runPepperCommand(cmd, venv, path = null) {
         ).trim()
     }
     return new groovy.json.JsonSlurperClassic().parseText(output)
+}
+
+/**
+* Create config file for pepper
+*
+* @param url            SALT_MASTER URL
+* @param credentialsId  credentials to SALT_API
+*/
+
+def createPepperEnv(url, credentialsId) {
+    def common = new com.mirantis.mk.Common()
+    rcFile = "${env.WORKSPACE}/pepperrc"
+    creds = common.getPasswordCredentials(credentialsId)
+    rc = """\
+[main]
+SALTAPI_EAUTH=pam
+SALTAPI_URL=${url}
+SALTAPI_USER=${creds.username}
+SALTAPI_PASS=${creds.password.toString()}
+"""
+    writeFile file: rcFile, text: rc
+    return rcFile
 }

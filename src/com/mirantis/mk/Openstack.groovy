@@ -143,8 +143,7 @@ def createHeatEnv(file, environment = [], original_file = null) {
 
     p = entries(environment)
     for (int i = 0; i < p.size(); i++) {
-        def value=p.get(i)[1].replaceAll("\n", '\\\\n')
-        envString = "${envString}  ${p.get(i)[0]}: \"${value}\"\n"
+        envString = "${envString}  ${p.get(i)[0]}: ${p.get(i)[1]}\n"
     }
 
     echo("writing to env file:\n${envString}")
@@ -219,46 +218,6 @@ def createHeatStack(client, name, template, params = [], environment = null, pat
     echo("[Heat Stack] Status: ${status}")
 }
 
-/**
- * Create OpenStack environment file
- *
- * @param file        Resulted file will be copied to VM to override the variables
- * @param overrides   List of thr variable which have to be overriden
- * @param template    Template of overrides.yml
- */
-/* def createOverridesTemplate(file, overrides = [], original_file = null) {
-    if (original_file) {
-        envString = readFile file: original_file
-    } else {
-        envString = "parameters:\n  _param:\n"
-    }
-
-    p = entries(overrides)
-    for (int i = 0; i < p.size(); i++) {
-        envString = "${envString}    ${p.get(i)[0]}: \"${p.get(i)[1]}\"\n"
-    }
-
-    echo("writing overrides to file:\n${envString}")
-    writeFile file: file, text: envString
-}
-*/
-/*
-* Parse and copy overrides to overrides.yml file
-*
-*/
-/* def saltOverrides(overrides = []) {
-
-    def salt_overrides_map = readYaml text: overrides
-    print ("salt_overrides_map ${salt_overrides_map}")
-        for (entry in entries(salt_overrides_map)) {
-            def key = entry[0]
-            def value = entry[1]
-            echo("Set salt override ${key}=${value}")
-        }
-        
-    createOverridesTemplate("${env.WORKSPACE}/template/env/_overrides.yml",salt_overrides_map,"${env.WORKSPACE}/template/env/_overrides_template.yml")    
-}
-*/
 /**
  * Returns list of stacks for stack name filter
  *
