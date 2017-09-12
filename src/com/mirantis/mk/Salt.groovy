@@ -61,7 +61,7 @@ def saltLogin(master) {
  * @param read_timeout http session read timeout
  */
 @NonCPS
-def runSaltCommand(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1) {
+def runSaltCommand(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1, overrides = null) {
     def http = new com.mirantis.mk.Http()
     def cmd
     def cmd_client
@@ -80,11 +80,18 @@ def runSaltCommand(master, client, target, function, batch = null, args = null, 
         data['batch'] = batch
         cmd_client = "--client local_batch --batch ${batch}"
     }
-    cmd = "pepper -T -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
 
-    if (args) {
-        data['arg'] = args
-        cmd = cmd + " \"" + args.join(',') + "\""
+    if (overrides && master.authToken == 'salt-pepper') {
+        if (args) {
+            data['arg'] = args
+            cmd = cmd + " \"" + args.join(' ') + "\""
+        }
+    } else {
+        if (args) {
+            data['arg'] = args
+            cmd = cmd + " \"" + args.join(',') + "\""
+        }
     }
 
     if (kwargs) {
@@ -650,7 +657,11 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
          def value = entry[1]
 
          common.debugMsg("Set salt override ${key}=${value}")
-         runSaltProcessStep(master, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
+         if (master.authToken == 'salt-pepper') {
+            runSaltCommand(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1, -1, true)
+         } else {
+            runSaltProcessStep(master, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
+         }
     }
     runSaltProcessStep(master, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
 }
