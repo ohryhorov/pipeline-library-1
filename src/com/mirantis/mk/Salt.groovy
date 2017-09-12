@@ -517,9 +517,9 @@ def runSaltProcessStep_(master, tgt, fun, arg = [], batch = null, output = false
     common.infoMsg("Running step ${fun} ${arg} on ${tgt}")
 
     if (batch == true) {
-        out = runSaltCommand(master, 'local_batch', ['expression': tgt, 'type': 'compound'], fun, String.valueOf(batch), arg, null, timeout)
+        out = runSaltCommand_(master, 'local_batch', ['expression': tgt, 'type': 'compound'], fun, String.valueOf(batch), arg, null, timeout)
     } else {
-        out = runSaltCommand(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
+        out = runSaltCommand_(master, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, null, timeout)
     }
 
     if (output == true) {
@@ -791,5 +791,21 @@ def runSaltCommand_(master, client, target, function, batch = null, args = null,
     //cmd = "pepper -c ${env.WORKSPACE}/pepperrc -C ${target.expression} ${function} ${batch}"
     println("cmd: ${cmd}")
 
-    return openstack.runOpenstackCommand(cmd, '', "${env.WORKSPACE}/venv")
+    return JSONObject JSON.parse(runPepperCommand(cmd, '', "${env.WORKSPACE}/venv"))
+}
+
+def runPepperCommand(cmd, venv, path = null) {
+    def python = new com.mirantis.mk.Python()
+    pepperCmd = ". ${venv}; ${cmd}"
+    if (path) {
+        output = python.runVirtualenvCommand(path, openstackCmd)
+    }
+    else {
+        echo("[Command]: ${pepperCmd}")
+        output = sh (
+            script: pepperCmd,
+            returnStdout: true
+        ).trim()
+    }
+    return output
 }
