@@ -28,26 +28,17 @@ def connection(url, credentialsId = "salt") {
 
 def connection_(url, credentialsId = "salt", pepper = null) {
     def common = new com.mirantis.mk.Common()
-    if (pepper) {
-        def cmd = "pepper -T -c ${env.WORKSPACE}/pepperrc --client local -C \"I@salt:master\" test.ping"
-        runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
-        
-        //def peppercache = new File('~/.peppercache')
-        def json = readFile(file:'~/.peppercache')
-        
-        //InputJSON = groovy.json.JsonSlurper().parseText(peppercache.text)
-        
-        InputJSON = groovy.json.JsonSlurperClassic().parseText(json)
-        println("${InputJSON}")
-        params = 'token'
 
+    params = [
+        "url": url,
+        "credentialsId": credentialsId,
+        "authToken": null,
+        "creds": common.getCredentials(credentialsId)
+    ]
+
+    if (pepper) {
+        params["authToken"] = 'salt-pepper'
     } else {
-        params = [
-            "url": url,
-            "credentialsId": credentialsId,
-            "authToken": null,
-            "creds": common.getCredentials(credentialsId)
-        ]
         params["authToken"] = saltLogin(params)
     }
 
