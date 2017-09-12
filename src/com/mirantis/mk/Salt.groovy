@@ -29,9 +29,10 @@ def connection(url, credentialsId = "salt") {
 def connection_(url, credentialsId = "salt", pepper = null) {
     def common = new com.mirantis.mk.Common()
     if (pepper) {
-        //runSaltCommand_('', 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'test.ping', false, '', true, -1, -1)
         def cmd = "pepper -T -c ${env.WORKSPACE}/pepperrc --client local -C \"I@salt:master\" test.ping"
         runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
+        def peppercache = readJSON file: '~/.peppercache'
+        println("${peppercache}")
         params = 'token'
 
     } else {
