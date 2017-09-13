@@ -688,7 +688,7 @@ def runPepperCommand(data, venv, path = null) {
 
     dataStr = new groovy.json.JsonBuilder(data).toString()
 
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc --json ${dataStr}"
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc --json \'${dataStr}\'"
 
     pepperCmd = ". ${venv}; ${cmd}"
     
