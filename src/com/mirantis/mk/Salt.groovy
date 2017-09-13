@@ -682,7 +682,7 @@ def runPepperCommand(data, cmd, venv, path = null) {
         cmd = cmd + " \"" + data['kwarg'].join(',') + "\""
     }
 
-    if (data[timeout] != -1) {
+    if (data['timeout'] != -1) {
         cmd = cmd + " --timout ${data['timeout']}"
     }
 
