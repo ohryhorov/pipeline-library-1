@@ -670,7 +670,7 @@ def runPepperCommand(data, cmd, venv, path = null) {
         cmd_client = "--client local_batch --batch ${data[batch]}"
     }
     
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${data['fun']}"
+//    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${data['fun']}"
 
     if (data['fun'] == 'reclass.cluster_meta_set' && data['arg']) {
         cmd = cmd + " \"" + data['arg'].join(' ') + "\""
@@ -686,6 +686,8 @@ def runPepperCommand(data, cmd, venv, path = null) {
         cmd = cmd + " --timout ${data['timeout']}"
     }
 
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc --json ${data}"
+    
     pepperCmd = ". ${venv}; ${cmd}"
     
     if (path) {
