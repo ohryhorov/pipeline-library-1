@@ -61,10 +61,8 @@ def saltLogin(master) {
  * @param read_timeout http session read timeout
  */
 @NonCPS
-def runSaltCommand(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1, overrides = null) {
+def runSaltCommand(master, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1) {
     def http = new com.mirantis.mk.Http()
-    def cmd
-    def cmd_client
 
     data = [
         'tgt': target.expression,
@@ -73,35 +71,21 @@ def runSaltCommand(master, client, target, function, batch = null, args = null, 
         'expr_form': target.type,
     ]
  
-    cmd_client = "--client ${client}"
-
     if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
         data['client']= "local_batch"
         data['batch'] = batch
-        cmd_client = "--client local_batch --batch ${batch}"
     }
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${function}"
 
-    if (overrides && master.authToken == 'salt-pepper') {
-        if (args) {
-            data['arg'] = args
-            cmd = cmd + " \"" + args.join(' ') + "\""
-        }
-    } else {
-        if (args) {
-            data['arg'] = args
-            cmd = cmd + " \"" + args.join(',') + "\""
-        }
+    if (args) {
+        data['arg'] = args
     }
 
     if (kwargs) {
         data['kwarg'] = kwargs
-        cmd = cmd + " \"" + kwarg.join(',') + "\""
     }
 
     if (timeout != -1) {
         data['timeout'] = timeout
-        cmd = cmd + " --timout ${timeout}"
     }
 
     headers = [
@@ -109,7 +93,7 @@ def runSaltCommand(master, client, target, function, batch = null, args = null, 
     ]
 
     if (master.authToken == 'salt-pepper') {
-        return runPepperCommand(cmd, '', "${env.WORKSPACE}/venv")
+        return runPepperCommand(data, '', "${env.WORKSPACE}/venv")
     } else {
         return http.sendHttpPostRequest("${master.url}/", data, headers, read_timeout)
     }
@@ -657,11 +641,11 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
          def value = entry[1]
 
          common.debugMsg("Set salt override ${key}=${value}")
-         if (master.authToken == 'salt-pepper') {
-            runSaltCommand(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1, -1, true)
-         } else {
+//         if (master.authToken == 'salt-pepper') {
+//            runSaltCommand(master, 'local', ['expression': 'I@salt:master', 'type': 'compound'], 'reclass.cluster_meta_set', false, ["${key}", "${value}"], null, -1, -1, true)
+//         } else {
             runSaltProcessStep(master, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
-         }
+//         }
     }
     runSaltProcessStep(master, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
 }
@@ -675,9 +659,35 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
 * @param path   Path to virtualenv
 */
 
-def runPepperCommand(cmd, venv, path = null) {
+def runPepperCommand(data, cmd, venv, path = null) {
     def python = new com.mirantis.mk.Python()
+    def cmd
+    def cmd_client
+
+    cmd_client = "--client ${data['client']}"
+
+    if(data['batch'] != null && ( (data['batch'] instanceof Integer && data['batch'] > 0) || (data['batch'] instanceof String && data['batch'].contains("%")))){
+        cmd_client = "--client local_batch --batch ${data[batch]}"
+    }
+    
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${data['fun']}"
+
+    if (data['fun'] == 'reclass.cluster_meta_set' && data['arg']) {
+        cmd = cmd + " \"" + data['arg'].join(' ') + "\""
+    } else {
+        cmd = cmd + " \"" + data['arg'].join(',') + "\""
+    }
+
+    if (data['kwargs']) {
+        cmd = cmd + " \"" + data['kwarg'].join(',') + "\""
+    }
+
+    if (data[timeout] != -1) {
+        cmd = cmd + " --timout ${data['timeout']}"
+    }
+
     pepperCmd = ". ${venv}; ${cmd}"
+    
     if (path) {
         output = python.runVirtualenvCommand(path, pepperCmd)
     }
@@ -688,6 +698,7 @@ def runPepperCommand(cmd, venv, path = null) {
             returnStdout: true
         ).trim()
     }
+
     return new groovy.json.JsonSlurperClassic().parseText(output)
 }
 
