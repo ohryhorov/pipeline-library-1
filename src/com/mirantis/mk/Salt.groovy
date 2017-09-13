@@ -661,41 +661,14 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
 
 def runPepperCommand(data, venv, path = null) {
     def python = new com.mirantis.mk.Python()
-    def cmd
-    def cmd_client
 
-    cmd_client = "--client ${data['client']}"
+    def dataStr = new groovy.json.JsonBuilder(data).toString()
 
-    if(data['batch'] != null && ( (data['batch'] instanceof Integer && data['batch'] > 0) || (data['batch'] instanceof String && data['batch'].contains("%")))){
-        cmd_client = "--client local_batch --batch ${data[batch]}"
-    }
-    
-//    cmd = "pepper -c ${env.WORKSPACE}/pepperrc ${cmd_client} -C \"${target.expression}\" ${data['fun']}"
-
-    if (data['fun'] == 'reclass.cluster_meta_set' && data['arg']) {
-        cmd = cmd + " \"" + data['arg'].join(' ') + "\""
-    } else {
-        cmd = cmd + " \"" + data['arg'].join(',') + "\""
-    }
-
-    if (data['kwargs']) {
-        cmd = cmd + " \"" + data['kwarg'].join(',') + "\""
-    }
-
-    if (data['timeout'] != -1) {
-        cmd = cmd + " --timout ${data['timeout']}"
-    }
-
-    dataStr = new groovy.json.JsonBuilder(data).toString()
-
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc --json \'${dataStr}\'"
-
-    pepperCmd = ". ${venv}; ${cmd}"
+    pepperCmd = ". ${venv}; pepper -c ${env.WORKSPACE}/pepperrc --json \'${dataStr}\'"
     
     if (path) {
         output = python.runVirtualenvCommand(path, pepperCmd)
-    }
-    else {
+    } else {
         echo("[Command]: ${pepperCmd}")
         output = sh (
             script: pepperCmd,
