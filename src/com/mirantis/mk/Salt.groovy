@@ -659,9 +659,9 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
 * @param path   Path to virtualenv
 */
 
-def runPepperCommand(data, cmd, venv, path = null) {
+def runPepperCommand(data, venv, path = null) {
     def python = new com.mirantis.mk.Python()
-//З    def cmd
+//    def cmd
     def cmd_client
 
     cmd_client = "--client ${data['client']}"
