@@ -686,7 +686,9 @@ def runPepperCommand(data, venv, path = null) {
         cmd = cmd + " --timout ${data['timeout']}"
     }
 
-    cmd = "pepper -c ${env.WORKSPACE}/pepperrc --json ${data}"
+    dataStr = new groovy.json.JsonBuilder(data).toString()
+
+    cmd = "pepper -c ${env.WORKSPACE}/pepperrc --json ${dataStr}"
 
     pepperCmd = ". ${venv}; ${cmd}"
     
