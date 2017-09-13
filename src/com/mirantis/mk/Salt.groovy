@@ -661,7 +661,7 @@ def setSaltOverrides(master, salt_overrides, reclass_dir="/srv/salt/reclass") {
 
 def runPepperCommand(data, venv, path = null) {
     def python = new com.mirantis.mk.Python()
-//    def cmd
+    def cmd
     def cmd_client
 
     cmd_client = "--client ${data['client']}"
