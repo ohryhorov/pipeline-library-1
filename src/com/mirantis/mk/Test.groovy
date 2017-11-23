@@ -9,24 +9,24 @@ package com.mirantis.mk
 /**
  * Run e2e conformance tests
  *
- * @param k8s_api    Kubernetes api address
- * @param image      Docker image with tests
- * @param timeout    Timeout waiting for e2e conformance tests
+ * @param target        Kubernetes node to run tests from
+ * @param k8s_api       Kubernetes api address
+ * @param image         Docker image with tests
+ * @param timeout       Timeout waiting for e2e conformance tests
  */
-def runConformanceTests(master, k8s_api, image, timeout=2400) {
+def runConformanceTests(master, target, k8s_api, image, timeout=2400) {
     def salt = new com.mirantis.mk.Salt()
     def containerName = 'conformance_tests'
     def outfile = "/tmp/" + image.replaceAll('/', '-') + '.output'
-    salt.cmdRun(master, 'ctl01*', "docker rm -f ${containerName}", false)
-    salt.cmdRun(master, 'ctl01*', "docker run -d --name ${containerName} --net=host -e API_SERVER=${k8s_api} ${image}")
+    salt.cmdRun(master, target, "docker rm -f ${containerName}", false)
+    salt.cmdRun(master, target, "docker run -d --name ${containerName} --net=host -e API_SERVER=${k8s_api} ${image}")
     sleep(10)
 
     print("Waiting for tests to run...")
-    salt.runSaltProcessStep(master, 'ctl01*', 'cmd.run', ["docker wait ${containerName}"], null, false, timeout)
+    salt.runSaltProcessStep(master, target, 'cmd.run', ["docker wait ${containerName}"], null, false, timeout)
 
     print("Writing test results to output file...")
-    salt.runSaltProcessStep(master, 'ctl01*', 'cmd.run', ["docker logs -t ${containerName} &> ${outfile}"])
-
+    salt.runSaltProcessStep(master, target, 'cmd.run', ["docker logs -t ${containerName} > ${outfile}"])
     print("Conformance test output saved in " + outfile)
 }
 
@@ -47,27 +47,64 @@ def copyTestsOutput(master, image) {
  * @param target            Host to run tests
  * @param pattern           If not false, will run only tests matched the pattern
  * @param logDir            Directory to store tempest/rally reports
+ * @param sourceFile        Path to the keystonerc file in the container
+ * @param set               Predefined set for tempest tests
+ * @param concurrency       How many processes to use to run Tempest tests
+ * @param tempestConf       A tempest.conf's file name
+ * @param skipList          A skip.list's file name
+ * @param localKeystone     Path to the keystonerc file in the local host
+ * @param localLogDir       Path to local destination folder for logs
  */
-def runTempestTests(master, dockerImageLink, target, pattern = "false", logDir = '/home/rally/rally_reports/') {
+def runTempestTests(master, dockerImageLink, target, pattern = "false", logDir = "/home/rally/rally_reports/",
+                    sourceFile="/home/rally/keystonercv3", set="full", concurrency="0", tempestConf="mcp.conf",
+                    skipList="mcp_skip.list", localKeystone="/root/keystonercv3" , localLogDir="/root/rally_reports",
+                    doCleanupResources = "false") {
     def salt = new com.mirantis.mk.Salt()
-    if (pattern == "false") {
-        salt.cmdRun(master, "${target}", "docker run --rm --net=host " +
-                                         "-e TEMPEST_CONF=mcp.conf " +
-                                         "-e SKIP_LIST=mcp_skip.list " +
-                                         "-e SOURCE_FILE=keystonercv3 " +
-                                         "-e LOG_DIR=${logDir} " +
-                                         "-v /root/:/home/rally ${dockerImageLink} >> docker-tempest.log")
+    salt.runSaltProcessStep(master, target, 'file.mkdir', ["${localLogDir}"])
+    def custom = ''
+    if (pattern != "false") {
+        custom = "--pattern " + pattern
     }
-    else {
-        salt.cmdRun(master, "${target}", "docker run --rm --net=host " +
-                                         "-e TEMPEST_CONF=mcp.conf " +
-                                         "-e SKIP_LIST=mcp_skip.list " +
-                                         "-e SOURCE_FILE=keystonercv3 " +
-                                         "-e LOG_DIR=${logDir} " +
-                                         "-e CUSTOM=\"--pattern ${pattern}\" " +
-                                         "-v /root/:/home/rally ${dockerImageLink} >> docker-tempest.log")
-    }
+    salt.cmdRun(master, "${target}", "docker run --rm --net=host " +
+                                    "-e SOURCE_FILE=${sourceFile} " +
+                                    "-e LOG_DIR=${logDir} " +
+                                    "-e SET=${set} " +
+                                    "-e CUSTOM='${custom}' " +
+                                    "-e CONCURRENCY=${concurrency} " +
+                                    "-e TEMPEST_CONF=${tempestConf} " +
+                                    "-e SKIP_LIST=${skipList} " +
+                                    "-e DO_CLEANUP_RESOURCES=${doCleanupResources} " +
+                                    "-v ${localKeystone}:${sourceFile} " +
+                                    "-v ${localLogDir}:/home/rally/rally_reports " +
+                                    "-v /etc/ssl/certs/:/etc/ssl/certs/ " +
+                                    "${dockerImageLink} >> docker-tempest.log")
 }
+
+
+/**
+ * Execute Rally scenarios
+ *
+ * @param dockerImageLink      Docker image link with rally and tempest
+ * @param target               Host to run scenarios
+ * @param scenario             Specify the scenario as a string
+ * @param containerName        Docker container name
+ * @param doCleanupResources   Do run clean-up script after tests? Cleans up OpenStack test resources
+ */
+def runRallyScenarios(master, dockerImageLink, target, scenario, logDir = "/home/rally/rally_reports/",
+                      doCleanupResources = "false", containerName = "rally_ci") {
+    def salt = new com.mirantis.mk.Salt()
+    salt.runSaltProcessStep(master, target, 'file.mkdir', ["/root/rally_reports"])
+    salt.cmdRun(master, target, "docker run --net=host -dit " +
+                                "--name ${containerName} " +
+                                "-e SOURCE_FILE=keystonercv3 " +
+                                "-e SCENARIO=${scenario} " +
+                                "-e DO_CLEANUP_RESOURCES=${doCleanupResources} " +
+                                "-e LOG_DIR=${logDir} " +
+                                "--entrypoint /bin/bash -v /root/:/home/rally ${dockerImageLink}")
+    salt.cmdRun(master, target, "docker exec ${containerName} " +
+                                "bash -c /usr/bin/run-rally | tee -a docker-rally.log")
+}
+
 
 /**
  * Upload results to cfg01 node
@@ -100,6 +137,7 @@ def install_docker(master, target) {
     def salt = new com.mirantis.mk.Salt()
     salt.runSaltProcessStep(master, "${target}", 'pkg.install', ["docker.io"])
 }
+
 
 /** Upload Tempest test results to Testrail
  *
@@ -176,4 +214,28 @@ def collectJUnitResults(testResultAction) {
         common.errorMsg("Cannot collect jUnit tests results, given result is null")
     }
     return [:]
+}
+
+
+/** Cleanup: Remove reports directory
+ *
+ * @param target                   Target node to remove repo
+ * @param reports_dir_name         Reports directory name to be removed (that is in /root/ on target node)
+ * @param archive_artifacts_name   Archive of the artifacts
+ */
+def removeReports(master, target, reports_dir_name = 'rally_reports', archive_artifacts_name = 'rally_reports.tar') {
+    def salt = new com.mirantis.mk.Salt()
+    salt.runSaltProcessStep(master, target, 'file.find', ["/root/${reports_dir_name}", '\\*', 'delete'])
+    salt.runSaltProcessStep(master, target, 'file.remove', ["/root/${archive_artifacts_name}"])
+}
+
+
+/** Cleanup: Remove Docker container
+ *
+ * @param target              Target node to remove Docker container
+ * @param image_link          The link of the Docker image that was used for the container
+ */
+def removeDockerContainer(master, target, containerName) {
+    def salt = new com.mirantis.mk.Salt()
+    salt.cmdRun(master, target, "docker rm -f ${containerName}")
 }

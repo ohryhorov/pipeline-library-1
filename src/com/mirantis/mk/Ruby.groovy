@@ -35,7 +35,7 @@ def installKitchen(kitchenInit=""){
                 gem 'inspec'
                 gem 'kitchen-salt', :git => 'https://github.com/salt-formulas/kitchen-salt.git'"""
         }
-    sh "rbenv exec bundler install --path vendor/bundle"
+    sh "rbenv exec bundle install --path vendor/bundle"
 }
 
 /**
@@ -59,8 +59,25 @@ def runKitchenTests(environment="", suite= ""){
  */
 def runKitchenCommand(cmd, environment = null){
     if(environment && environment != ""){
-        return sh(script: "${environment} rbenv exec bundler exec kitchen ${cmd}", returnStdout: true)
+        return sh(script: "${environment} rbenv exec bundle exec kitchen ${cmd}", returnStdout: true)
     }else{
-        return sh(script: "rbenv exec bundler exec kitchen ${cmd}", returnStdout: true)
+        return sh(script: "rbenv exec bundle exec kitchen ${cmd}", returnStdout: true)
     }
+}
+
+/**
+ * Returns suite name from given env
+ * @param kitchenEnv kitchen env string
+ * @return suite name of empty string if no suite found
+ */
+def getSuiteName(kitchenEnv){
+  def suitePattern = java.util.regex.Pattern.compile("\\s?SUITE=([^\\s]*)")
+  def suiteMatcher = suitePattern.matcher(kitchenEnv)
+  if (suiteMatcher.find()) {
+      def suite = suiteMatcher.group(1)
+      if(suite && suite != ""){
+          return suite.replaceAll("_", "-")
+      }
+  }
+  return ""
 }

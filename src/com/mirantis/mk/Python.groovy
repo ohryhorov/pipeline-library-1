@@ -14,11 +14,13 @@ package com.mirantis.mk
  * @param reqs          Environment requirements in list format
  * @param reqs_path     Environment requirements path in str format
  */
-def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=false) {
+def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=false, useSystemPackages=false) {
     def common = new com.mirantis.mk.Common()
 
     def virtualenv_cmd = "virtualenv ${path} --python ${python}"
-
+    if (useSystemPackages){
+        virtualenv_cmd += " --system-site-packages"
+    }
     if (clean) {
         common.infoMsg("Cleaning venv directory " + path)
         sh("rm -rf \"${path}\"")
@@ -26,6 +28,11 @@ def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=fal
 
     common.infoMsg("[Python ${path}] Setup ${python} environment")
     sh(returnStdout: true, script: virtualenv_cmd)
+    try {
+        runVirtualenvCommand(path, "wget -q -T 3 --spider http://google.com && pip install -U setuptools pip")
+    } catch(Exception e) {
+        common.warningMsg("Setuptools and pip cannot be updated, you might be offline")
+    }
     if (reqs_path==null) {
         def args = ""
         for (req in reqs) {
@@ -282,4 +289,46 @@ def jinjaBuildTemplate (template, context, path = none) {
     data = sh (returnStdout: true, script: cmd)
     echo(data)
     return data
+}
+
+/**
+ * Install salt-pepper in isolated environment
+ *
+ * @param path        Path where virtualenv is created
+ * @param url         SALT_MASTER_URL
+ * @param credentialsId        Credentials to salt api
+ */
+def setupPepperVirtualenv(path, url, credentialsId, clean = false) {
+    def common = new com.mirantis.mk.Common()
+
+    // virtualenv setup
+    // TODO: once pepper changes are in pypi, reenable these lines
+    // requirements = ['salt-pepper']
+    requirements = []
+    setupVirtualenv(path, 'python2', requirements, null, clean, true)
+    runVirtualenvCommand(path, "pip install git+https://github.com/chnyda/pepper.git")
+
+    // pepperrc creation
+    rcFile = "${path}/pepperrc"
+    creds = common.getPasswordCredentials(credentialsId)
+    rc = """\
+[main]
+SALTAPI_EAUTH=pam
+SALTAPI_URL=${url}
+SALTAPI_USER=${creds.username}
+SALTAPI_PASS=${creds.password.toString()}
+"""
+    writeFile file: rcFile, text: rc
+    return rcFile
+}
+
+/**
+ * Install devops in isolated environment
+ *
+ * @param path        Path where virtualenv is created
+ * @param clean       Define to true is the venv have to cleaned up before install a new one
+ */
+def setupDevOpsVenv(venv, clean=false) {
+    requirements = ['git+https://github.com/openstack/fuel-devops.git']
+    setupVirtualenv(venv, 'python2', requirements, null, false, clean)
 }

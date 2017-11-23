@@ -78,12 +78,7 @@ def setProperties(String artifactUrl, LinkedHashMap properties, Boolean recursiv
     } else {
         recursive = 'recursive=0'
     }
-    for (int i = 0; i < properties.size(); i++) {
-        // avoid serialization errors
-        key = properties.entrySet().toArray()[i].key
-        value = properties.entrySet().toArray()[i].value
-        properties_str += "${key}=${value}|"
-    }
+    properties_str += properties.collect({"${it.key}=${it.value}"}).join(';')
     def url = "${artifactUrl}?${properties_str}&${recursive}"
     withCredentials([
             [$class          : 'UsernamePasswordMultiBinding',
@@ -229,7 +224,7 @@ def uploadImageToArtifactory (ArtifactoryServer server, String registry, String 
  */
 def uploadBinariesToArtifactory (ArtifactoryServer server, BuildInfo buildInfo, String uploadSpec,
                                  Boolean publishInfo = false) {
-    buildInfo.append(server.upload(uploadSpec))
+    server.upload(uploadSpec, buildInfo)
 
     if ( publishInfo ) {
         buildInfo.env.capture = true
