@@ -4,43 +4,43 @@ package com.mirantis.mk
  *
 */
 
-def validateFoundationInfra(master) {
+def validateFoundationInfra(master, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
-    salt.runSaltProcessStep(master, 'I@salt:master', 'cmd.run', ['salt-key'], null, true)
-    salt.runSaltProcessStep(master, 'I@salt:minion', 'test.version', [], null, true)
-    salt.runSaltProcessStep(master, 'I@salt:master', 'cmd.run', ['reclass-salt --top'], null, true)
-    salt.runSaltProcessStep(master, 'I@reclass:storage', 'reclass.inventory', [], null, true)
-    salt.runSaltProcessStep(master, 'I@salt:minion', 'state.show_top', [], null, true)
+    salt.runSaltProcessStep(master, "I@salt:master ${tgt_extra}", 'cmd.run', ['salt-key'], null, true)
+    salt.runSaltProcessStep(master, "I@salt:minion ${tgt_extra}", 'test.version', [], null, true)
+    salt.runSaltProcessStep(master, "I@salt:master ${tgt_extra}", 'cmd.run', ['reclass-salt --top'], null, true)
+    salt.runSaltProcessStep(master, "I@reclass:storage ${tgt_extra}", 'reclass.inventory', [], null, true)
+    salt.runSaltProcessStep(master, "I@salt:minion ${tgt_extra}", 'state.show_top', [], null, true)
 }
 
-def installFoundationInfra(master, staticMgmtNet=false) {
+def installFoundationInfra(master, staticMgmtNet=false, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
     // NOTE(vsaienko) Apply reclass first, it may update cluster model
     // apply linux and salt.master salt.minion states afterwards to make sure
     // correct cluster model is used.
-    salt.enforceState(master, 'I@salt:master', ['reclass'], true)
+    salt.enforceState(master, "I@salt:master ${tgt_extra}", ['reclass'], true)
 
-    salt.enforceState(master, 'I@salt:master', ['linux.system'], true)
-    salt.enforceState(master, 'I@salt:master', ['salt.master'], true, false, null, false, 120, 2)
-    salt.runSaltProcessStep(master, '*', 'saltutil.refresh_pillar', [], null, true)
-    salt.runSaltProcessStep(master, '*', 'saltutil.sync_all', [], null, true)
+    salt.enforceState(master, "I@salt:master ${tgt_extra}", ['linux.system'], true)
+    salt.enforceState(master, "I@salt:master ${tgt_extra}", ['salt.master'], true, false, null, false, 120, 2)
+    salt.runSaltProcessStep(master, "* ${tgt_extra}", 'saltutil.refresh_pillar', [], null, true)
+    salt.runSaltProcessStep(master, "* ${tgt_extra}", 'saltutil.sync_all', [], null, true)
 
-    salt.enforceState(master, 'I@salt:master', ['salt.minion'], true, false, null, false, 60, 2)
-    salt.enforceState(master, 'I@salt:master', ['salt.minion'], true)
-    salt.runSaltProcessStep(master, '*', 'saltutil.refresh_pillar', [], null, true)
-    salt.runSaltProcessStep(master, '*', 'saltutil.refresh_grains', [], null, true)
-    salt.runSaltProcessStep(master, '*', 'saltutil.sync_all', [], null, true)
+    salt.enforceState(master, "I@salt:master ${tgt_extra}", ['salt.minion'], true, false, null, false, 60, 2)
+    salt.enforceState(master, "I@salt:master ${tgt_extra}", ['salt.minion'], true)
+    salt.runSaltProcessStep(master, "* ${tgt_extra}", 'saltutil.refresh_pillar', [], null, true)
+    salt.runSaltProcessStep(master, "* ${tgt_extra}", 'saltutil.refresh_grains', [], null, true)
+    salt.runSaltProcessStep(master, "* ${tgt_extra}", 'saltutil.sync_all', [], null, true)
 
-    salt.enforceState(master, '*', ['linux.system'], true)
+    salt.enforceState(master, "* ${tgt_extra}", ['linux.system'], true)
     if (staticMgmtNet) {
-        salt.runSaltProcessStep(master, '*', 'cmd.shell', ["salt-call state.sls linux.network; salt-call service.restart salt-minion"], null, true, 60)
+        salt.runSaltProcessStep(master, "* ${tgt_extra}", 'cmd.shell', ["salt-call state.sls linux.network; salt-call service.restart salt-minion"], null, true, 60)
     }
-    salt.enforceState(master, 'I@linux:system', ['linux', 'openssh', 'ntp'], true)
-    salt.enforceState(master, '*', ['salt.minion'], true, false, null, false, 60, 2)
+    salt.enforceState(master, "I@linux:system ${tgt_extra}", ['linux', 'openssh', 'ntp'], true)
+    salt.enforceState(master, "* ${tgt_extra}", ['salt.minion'], true, false, null, false, 60, 2)
     sleep(5)
-    salt.enforceState(master, '*', ['linux.network.host'], true)
+    salt.enforceState(master, "* ${tgt_extra}", ['linux.network.host'], true)
 }
 
 def installFoundationInfraOnTarget(master, target, staticMgmtNet=false) {
@@ -80,306 +80,306 @@ def installInfraKvm(master) {
     salt.runSaltProcessStep(master, '* and not kvm*', 'saltutil.sync_all', [], null, true)
 }
 
-def installInfra(master) {
+def installInfra(master, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
     // Install glusterfs
-    if (salt.testTarget(master, 'I@glusterfs:server')) {
-        salt.enforceState(master, 'I@glusterfs:server', 'glusterfs.server.service', true)
+    if (salt.testTarget(master, "I@glusterfs:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@glusterfs:server ${tgt_extra}", 'glusterfs.server.service', true)
 
         withEnv(['ASK_ON_ERROR=false']){
             retry(5) {
-                salt.enforceState(master, 'I@glusterfs:server and *01*', 'glusterfs.server.setup', true)
+                salt.enforceState(master, "I@glusterfs:server and *01* ${tgt_extra}", 'glusterfs.server.setup', true)
             }
         }
 
-        salt.runSaltProcessStep(master, 'I@glusterfs:server', 'cmd.run', ['gluster peer status'], null, true)
-        salt.runSaltProcessStep(master, 'I@glusterfs:server', 'cmd.run', ['gluster volume status'], null, true)
+        salt.runSaltProcessStep(master, "I@glusterfs:server ${tgt_extra}", 'cmd.run', ['gluster peer status'], null, true)
+        salt.runSaltProcessStep(master, "I@glusterfs:server ${tgt_extra}", 'cmd.run', ['gluster volume status'], null, true)
     }
 
     // Ensure glusterfs clusters is ready
-    if (salt.testTarget(master, 'I@glusterfs:client')) {
-        salt.enforceState(master, 'I@glusterfs:client', 'glusterfs.client', true)
+    if (salt.testTarget(master, "I@glusterfs:client ${tgt_extra}")) {
+        salt.enforceState(master, "I@glusterfs:client ${tgt_extra}", 'glusterfs.client', true)
     }
 
     // Install galera
-    if (salt.testTarget(master, 'I@galera:master') || salt.testTarget(master, 'I@galera:slave')) {
+    if (salt.testTarget(master, "I@galera:master ${tgt_extra}") || salt.testTarget(master, 'I@galera:slave')) {
         withEnv(['ASK_ON_ERROR=false']){
             retry(2) {
-                salt.enforceState(master, 'I@galera:master', 'galera', true)
+                salt.enforceState(master, "I@galera:master ${tgt_extra}", 'galera', true)
             }
         }
-        salt.enforceState(master, 'I@galera:slave', 'galera', true)
+        salt.enforceState(master, "I@galera:slave ${tgt_extra}", 'galera', true)
 
         // Check galera status
-        salt.runSaltProcessStep(master, 'I@galera:master', 'mysql.status')
-        salt.runSaltProcessStep(master, 'I@galera:slave', 'mysql.status')
+        salt.runSaltProcessStep(master, "I@galera:master ${tgt_extra}", 'mysql.status')
+        salt.runSaltProcessStep(master, "I@galera:slave ${tgt_extra}", 'mysql.status')
     // If galera is not enabled check if we need to install mysql:server
-    } else if (salt.testTarget(master, 'I@mysql:server')){
-        salt.enforceState(master, 'I@mysql:server', 'mysql.server', true)
-        if (salt.testTarget(master, 'I@mysql:client')){
-            salt.enforceState(master, 'I@mysql:client', 'mysql.client', true)
+    } else if (salt.testTarget(master, "I@mysql:server ${tgt_extra}")){
+        salt.enforceState(master, "I@mysql:server ${tgt_extra}", 'mysql.server', true)
+        if (salt.testTarget(master, "I@mysql:client ${tgt_extra}")){
+            salt.enforceState(master, "I@mysql:client ${tgt_extra}", 'mysql.client', true)
         }
     }
 
     // Install docker
-    if (salt.testTarget(master, 'I@docker:host')) {
-        salt.enforceState(master, 'I@docker:host', 'docker.host')
-        salt.cmdRun(master, 'I@docker:host', 'docker ps')
+    if (salt.testTarget(master, "I@docker:host ${tgt_extra}")) {
+        salt.enforceState(master, "I@docker:host ${tgt_extra}", 'docker.host')
+        salt.cmdRun(master, "I@docker:host ${tgt_extra}", 'docker ps')
     }
 
     // Install keepalived
-    if (salt.testTarget(master, 'I@keepalived:cluster')) {
-        salt.enforceState(master, 'I@keepalived:cluster and *01*', 'keepalived', true)
-        salt.enforceState(master, 'I@keepalived:cluster', 'keepalived', true)
+    if (salt.testTarget(master, "I@keepalived:cluster ${tgt_extra}")) {
+        salt.enforceState(master, "I@keepalived:cluster and *01* ${tgt_extra}", 'keepalived', true)
+        salt.enforceState(master, "I@keepalived:cluster ${tgt_extra}", 'keepalived', true)
     }
 
     // Install rabbitmq
-    if (salt.testTarget(master, 'I@rabbitmq:server')) {
+    if (salt.testTarget(master, "I@rabbitmq:server ${tgt_extra}")) {
         withEnv(['ASK_ON_ERROR=false']){
             retry(2) {
-                salt.enforceState(master, 'I@rabbitmq:server', 'rabbitmq', true)
+                salt.enforceState(master, "I@rabbitmq:server ${tgt_extra}", 'rabbitmq', true)
             }
         }
 
         // Check the rabbitmq status
-        salt.runSaltProcessStep(master, 'I@rabbitmq:server', 'cmd.run', ['rabbitmqctl cluster_status'])
+        salt.runSaltProcessStep(master, "I@rabbitmq:server ${tgt_extra}", 'cmd.run', ['rabbitmqctl cluster_status'])
     }
 
     // Install haproxy
-    if (salt.testTarget(master, 'I@haproxy:proxy')) {
-        salt.enforceState(master, 'I@haproxy:proxy', 'haproxy', true)
-        salt.runSaltProcessStep(master, 'I@haproxy:proxy', 'service.status', ['haproxy'])
-        salt.runSaltProcessStep(master, 'I@haproxy:proxy', 'service.restart', ['rsyslog'])
+    if (salt.testTarget(master, "I@haproxy:proxy ${tgt_extra}")) {
+        salt.enforceState(master, "I@haproxy:proxy ${tgt_extra}", 'haproxy', true)
+        salt.runSaltProcessStep(master, "I@haproxy:proxy ${tgt_extra}", 'service.status', ['haproxy'])
+        salt.runSaltProcessStep(master, "I@haproxy:proxy ${tgt_extra}", 'service.restart', ['rsyslog'])
     }
 
     // Install memcached
-    if (salt.testTarget(master, 'I@memcached:server')) {
-        salt.enforceState(master, 'I@memcached:server', 'memcached', true)
+    if (salt.testTarget(master, "I@memcached:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@memcached:server ${tgt_extra}", 'memcached', true)
     }
 
     // Install etcd
-    if (salt.testTarget(master, 'I@etcd:server')) {
-        salt.enforceState(master, 'I@etcd:server', 'etcd.server.service')
-        salt.cmdRun(master, 'I@etcd:server', '. /var/lib/etcd/configenv && etcdctl cluster-health')
+    if (salt.testTarget(master, "I@etcd:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@etcd:server ${tgt_extra}", 'etcd.server.service')
+        salt.cmdRun(master, "I@etcd:server ${tgt_extra}", '. /var/lib/etcd/configenv && etcdctl cluster-health')
     }
 }
 
-def installOpenstackInfra(master) {
+def installOpenstackInfra(master, tgt_extra=null) {
     def orchestrate = new com.mirantis.mk.Orchestrate()
 
     // THIS FUNCTION IS LEGACY, PLEASE USE installInfra directly
-    orchestrate.installInfra(master)
+    orchestrate.installInfra(master, tgt_extra)
 }
 
 
-def installOpenstackControl(master) {
+def installOpenstackControl(master, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
     // Install horizon dashboard
-    if (salt.testTarget(master, 'I@horizon:server')) {
-        salt.enforceState(master, 'I@horizon:server', 'horizon', true)
+    if (salt.testTarget(master, "I@horizon:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@horizon:server ${tgt_extra}", 'horizon', true)
     }
-    if (salt.testTarget(master, 'I@nginx:server')) {
-        salt.enforceState(master, 'I@nginx:server', 'salt.minion', true)
-        salt.enforceState(master, 'I@nginx:server', 'nginx', true)
+    if (salt.testTarget(master, "I@nginx:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@nginx:server ${tgt_extra}", 'salt.minion', true)
+        salt.enforceState(master, "I@nginx:server ${tgt_extra}", 'nginx', true)
     }
 
     // setup keystone service
-    if (salt.testTarget(master, 'I@keystone:server')) {
+    if (salt.testTarget(master, "I@keystone:server ${tgt_extra}")) {
         //runSaltProcessStep(master, 'I@keystone:server', 'state.sls', ['keystone.server'], 1)
-        salt.enforceState(master, 'I@keystone:server and *01*', 'keystone.server', true)
-        salt.enforceState(master, 'I@keystone:server', 'keystone.server', true)
+        salt.enforceState(master, "I@keystone:server and *01* ${tgt_extra}", 'keystone.server', true)
+        salt.enforceState(master, "I@keystone:server ${tgt_extra}", 'keystone.server', true)
         // populate keystone services/tenants/roles/users
 
         // keystone:client must be called locally
         //salt.runSaltProcessStep(master, 'I@keystone:client', 'cmd.run', ['salt-call state.sls keystone.client'], null, true)
-        salt.runSaltProcessStep(master, 'I@keystone:server', 'service.restart', ['apache2'])
+        salt.runSaltProcessStep(master, "I@keystone:server ${tgt_extra}", 'service.restart', ['apache2'])
         sleep(30)
     }
-    if (salt.testTarget(master, 'I@keystone:client')) {
-        salt.enforceState(master, 'I@keystone:client and *01*', 'keystone.client', true)
-        salt.enforceState(master, 'I@keystone:client', 'keystone.client', true)
+    if (salt.testTarget(master, "I@keystone:client ${tgt_extra}")) {
+        salt.enforceState(master, "I@keystone:client and *01* ${tgt_extra}", 'keystone.client', true)
+        salt.enforceState(master, "I@keystone:client ${tgt_extra}", 'keystone.client', true)
     }
-    if (salt.testTarget(master, 'I@keystone:server')) {
-        salt.runSaltProcessStep(master, 'I@keystone:server', 'cmd.run', ['. /root/keystonercv3; openstack service list'], null, true)
+    if (salt.testTarget(master, "I@keystone:server ${tgt_extra}")) {
+        salt.runSaltProcessStep(master, "I@keystone:server ${tgt_extra}", 'cmd.run', ['. /root/keystonercv3; openstack service list'], null, true)
     }
 
     // Install glance
-    if (salt.testTarget(master, 'I@glance:server')) {
+    if (salt.testTarget(master, "I@glance:server ${tgt_extra}")) {
         //runSaltProcessStep(master, 'I@glance:server', 'state.sls', ['glance.server'], 1)
-        salt.enforceState(master, 'I@glance:server and *01*', 'glance.server', true)
-       salt.enforceState(master, 'I@glance:server', 'glance.server', true)
+        salt.enforceState(master, "I@glance:server and *01* ${tgt_extra}", 'glance.server', true)
+       salt.enforceState(master, "I@glance:server ${tgt_extra}", 'glance.server', true)
     }
 
     // Check glance service
-    if (salt.testTarget(master, 'I@glance:server')){
-        salt.runSaltProcessStep(master, 'I@keystone:server', 'cmd.run', ['. /root/keystonerc; glance image-list'], null, true)
+    if (salt.testTarget(master, "I@glance:server ${tgt_extra}")){
+        salt.runSaltProcessStep(master, "I@keystone:server ${tgt_extra}", 'cmd.run', ['. /root/keystonerc; glance image-list'], null, true)
     }
 
     // Create glance resources
-    if (salt.testTarget(master, 'I@glance:client')) {
-        salt.enforceState(master, 'I@glance:client', 'glance.client', true)
+    if (salt.testTarget(master, "I@glance:client ${tgt_extra}")) {
+        salt.enforceState(master, "I@glance:client ${tgt_extra}", 'glance.client', true)
     }
 
     // Install and check nova service
-    if (salt.testTarget(master, 'I@nova:controller')) {
+    if (salt.testTarget(master, "I@nova:controller ${tgt_extra}")) {
         //runSaltProcessStep(master, 'I@nova:controller', 'state.sls', ['nova'], 1)
-        salt.enforceState(master, 'I@nova:controller and *01*', 'nova.controller', true)
-        salt.enforceState(master, 'I@nova:controller', 'nova.controller', true)
-        if (salt.testTarget(master, 'I@keystone:server')) {
-            salt.runSaltProcessStep(master, 'I@keystone:server', 'cmd.run', ['. /root/keystonerc; nova service-list'], null, true)
+        salt.enforceState(master, "I@nova:controller and *01* ${tgt_extra}", 'nova.controller', true)
+        salt.enforceState(master, "I@nova:controller ${tgt_extra}", 'nova.controller', true)
+        if (salt.testTarget(master, "I@keystone:server ${tgt_extra}")) {
+            salt.runSaltProcessStep(master, "I@keystone:server ${tgt_extra}", 'cmd.run', ['. /root/keystonerc; nova service-list'], null, true)
         }
     }
 
     // Create nova resources
-    if (salt.testTarget(master, 'I@nova:client')) {
-        salt.enforceState(master, 'I@nova:client', 'nova.client', true)
+    if (salt.testTarget(master, "I@nova:client ${tgt_extra}")) {
+        salt.enforceState(master, "I@nova:client ${tgt_extra}", 'nova.client', true)
     }
 
     // Install and check cinder service
-    if (salt.testTarget(master, 'I@cinder:controller')) {
+    if (salt.testTarget(master, "I@cinder:controller ${tgt_extra}")) {
         //runSaltProcessStep(master, 'I@cinder:controller', 'state.sls', ['cinder'], 1)
-        salt.enforceState(master, 'I@cinder:controller and *01*', 'cinder', true)
-        salt.enforceState(master, 'I@cinder:controller', 'cinder', true)
-        if (salt.testTarget(master, 'I@keystone:server')) {
-            salt.runSaltProcessStep(master, 'I@keystone:server', 'cmd.run', ['. /root/keystonerc; cinder list'], null, true)
+        salt.enforceState(master, "I@cinder:controller and *01* ${tgt_extra}", 'cinder', true)
+        salt.enforceState(master, "I@cinder:controller ${tgt_extra}", 'cinder', true)
+        if (salt.testTarget(master, "I@keystone:server ${tgt_extra}")) {
+            salt.runSaltProcessStep(master, "I@keystone:server ${tgt_extra}", 'cmd.run', ['. /root/keystonerc; cinder list'], null, true)
         }
     }
 
     // Install neutron service
-    if (salt.testTarget(master, 'I@neutron:server')) {
+    if (salt.testTarget(master, "I@neutron:server ${tgt_extra}")) {
         //runSaltProcessStep(master, 'I@neutron:server', 'state.sls', ['neutron'], 1)
 
-        salt.enforceState(master, 'I@neutron:server and *01*', 'neutron.server', true)
-        salt.enforceState(master, 'I@neutron:server', 'neutron.server', true)
-        if (salt.testTarget(master, 'I@keystone:server')) {
-            salt.runSaltProcessStep(master, 'I@keystone:server', 'cmd.run', ['. /root/keystonerc; neutron agent-list'], null, true)
+        salt.enforceState(master, "I@neutron:server and *01* ${tgt_extra}", 'neutron.server', true)
+        salt.enforceState(master, "I@neutron:server ${tgt_extra}", 'neutron.server', true)
+        if (salt.testTarget(master, "I@keystone:server ${tgt_extra}")) {
+            salt.runSaltProcessStep(master, "I@keystone:server ${tgt_extra}", 'cmd.run', ['. /root/keystonerc; neutron agent-list'], null, true)
         }
     }
 
     // Create neutron resources
-    if (salt.testTarget(master, 'I@neutron:client')) {
-        salt.enforceState(master, 'I@neutron:client', 'neutron.client', true)
+    if (salt.testTarget(master, "I@neutron:client ${tgt_extra}")) {
+        salt.enforceState(master, "I@neutron:client ${tgt_extra}", 'neutron.client', true)
     }
 
     // Install heat service
-    if (salt.testTarget(master, 'I@heat:server')) {
+    if (salt.testTarget(master, "I@heat:server ${tgt_extra}")) {
         //runSaltProcessStep(master, 'I@heat:server', 'state.sls', ['heat'], 1)
-        salt.enforceState(master, 'I@heat:server and *01*', 'heat', true)
-        salt.enforceState(master, 'I@heat:server', 'heat', true)
-        if (salt.testTarget(master, 'I@keystone:server')) {
-            salt.runSaltProcessStep(master, 'I@keystone:server', 'cmd.run', ['. /root/keystonerc; heat resource-type-list'], null, true)
+        salt.enforceState(master, "I@heat:server and *01* ${tgt_extra}", 'heat', true)
+        salt.enforceState(master, "I@heat:server ${tgt_extra}", 'heat', true)
+        if (salt.testTarget(master, "I@keystone:server ${tgt_extra}")) {
+            salt.runSaltProcessStep(master, "I@keystone:server ${tgt_extra}", 'cmd.run', ['. /root/keystonerc; heat resource-type-list'], null, true)
         }
     }
 
     // Restart nova api
-    if (salt.testTarget(master, 'I@nova:controller')) {
-        salt.runSaltProcessStep(master, 'I@nova:controller', 'service.restart', ['nova-api'])
+    if (salt.testTarget(master, "I@nova:controller ${tgt_extra}")) {
+        salt.runSaltProcessStep(master, "I@nova:controller ${tgt_extra}", 'service.restart', ['nova-api'])
     }
 
     // Install ironic service
-    if (salt.testTarget(master, 'I@ironic:api')) {
-        salt.enforceState(master, 'I@ironic:api and *01*', 'ironic.api', true)
-        salt.enforceState(master, 'I@ironic:api', 'ironic.api', true)
+    if (salt.testTarget(master, "I@ironic:api ${tgt_extra}")) {
+        salt.enforceState(master, "I@ironic:api and *01* ${tgt_extra}", 'ironic.api', true)
+        salt.enforceState(master, "I@ironic:api ${tgt_extra}", 'ironic.api', true)
     }
 
     // Install designate service
-    if (salt.testTarget(master, 'I@designate:server:enabled')) {
-        if (salt.testTarget(master, 'I@designate:server:backend:bind9')) {
-            salt.enforceState(master, 'I@bind:server', 'bind.server', true)
+    if (salt.testTarget(master, "I@designate:server:enabled ${tgt_extra}")) {
+        if (salt.testTarget(master, "I@designate:server:backend:bind9 ${tgt_extra}")) {
+            salt.enforceState(master, "I@bind:server ${tgt_extra}", 'bind.server', true)
         }
-        if (salt.testTarget(master, 'I@designate:server:backend:pdns4')) {
-            salt.enforceState(master, 'I@powerdns:server', 'powerdns.server', true)
+        if (salt.testTarget(master, "I@designate:server:backend:pdns4 ${tgt_extra}")) {
+            salt.enforceState(master, "I@powerdns:server ${tgt_extra}", 'powerdns.server', true)
         }
-        salt.enforceState(master, 'I@designate:server and *01*', 'designate.server', true)
-        salt.enforceState(master, 'I@designate:server', 'designate.server', true)
+        salt.enforceState(master, "I@designate:server and *01* ${tgt_extra}", 'designate.server', true)
+        salt.enforceState(master, "I@designate:server ${tgt_extra}", 'designate.server', true)
     }
 
     // Install octavia api service
-    if (salt.testTarget(master, 'I@octavia:api')) {
-        salt.enforceState(master, 'I@octavia:api', 'octavia', true)
+    if (salt.testTarget(master, "I@octavia:api ${tgt_extra}")) {
+        salt.enforceState(master, "I@octavia:api ${tgt_extra}", 'octavia', true)
     }
 
     // Install DogTag server service
-    if (salt.testTarget(master, 'I@dogtag:server')) {
-        salt.enforceState(master, 'I@dogtag:server and *01*', 'dogtag.server', true)
-        salt.enforceState(master, 'I@dogtag:server', 'dogtag.server', true)
+    if (salt.testTarget(master, "I@dogtag:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@dogtag:server and *01* ${tgt_extra}", 'dogtag.server', true)
+        salt.enforceState(master, "I@dogtag:server ${tgt_extra}", 'dogtag.server', true)
     }
 
     // Install barbican server service
-    if (salt.testTarget(master, 'I@barbican:server')) {
-        salt.enforceState(master, 'I@barbican:server and *01*', 'barbican.server', true)
-        salt.enforceState(master, 'I@barbican:server', 'barbican.server', true)
+    if (salt.testTarget(master, "I@barbican:server")) {
+        salt.enforceState(master, "I@barbican:server and *01* ${tgt_extra}", 'barbican.server', true)
+        salt.enforceState(master, "I@barbican:server ${tgt_extra}", 'barbican.server', true)
     }
     // Install barbican client
-    if (salt.testTarget(master, 'I@barbican:client')) {
-        salt.enforceState(master, 'I@barbican:client', 'barbican.client', true)
+    if (salt.testTarget(master, "I@barbican:client ${tgt_extra}")) {
+        salt.enforceState(master, "I@barbican:client ${tgt_extra}", 'barbican.client', true)
     }
 
     // Install ceilometer server
-    if (salt.testTarget(master, 'I@ceilometer:server')) {
-        salt.enforceState(master, 'I@ceilometer:server', 'ceilometer', true)
+    if (salt.testTarget(master, "I@ceilometer:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@ceilometer:server ${tgt_extra}", 'ceilometer', true)
     }
 
     // Install aodh server
-    if (salt.testTarget(master, 'I@aodh:server')) {
-        salt.enforceState(master, 'I@aodh:server', 'aodh', true)
+    if (salt.testTarget(master, "I@aodh:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@aodh:server ${tgt_extra}", 'aodh', true)
     }
 }
 
 
-def installIronicConductor(master){
+def installIronicConductor(master, tgt_extra=null){
     def salt = new com.mirantis.mk.Salt()
 
-    if (salt.testTarget(master, 'I@ironic:conductor')) {
-        salt.enforceState(master, 'I@ironic:conductor', 'ironic.conductor', true)
-        salt.enforceState(master, 'I@ironic:conductor', 'apache', true)
+    if (salt.testTarget(master, "I@ironic:conductor ${tgt_extra}")) {
+        salt.enforceState(master, "I@ironic:conductor ${tgt_extra}", 'ironic.conductor', true)
+        salt.enforceState(master, "I@ironic:conductor ${tgt_extra}", 'apache', true)
     }
-    if (salt.testTarget(master, 'I@tftpd_hpa:server')) {
-        salt.enforceState(master, 'I@tftpd_hpa:server', 'tftpd_hpa', true)
-    }
-
-    if (salt.testTarget(master, 'I@nova:compute')) {
-        salt.runSaltProcessStep(master, 'I@nova:compute', 'service.restart', ['nova-compute'])
+    if (salt.testTarget(master, "I@tftpd_hpa:server ${tgt_extra}")) {
+        salt.enforceState(master, "I@tftpd_hpa:server ${tgt_extra}", 'tftpd_hpa', true)
     }
 
-    if (salt.testTarget(master, 'I@baremetal_simulator:enabled')) {
-        salt.enforceState(master, 'I@baremetal_simulator:enabled', 'baremetal_simulator', true)
+    if (salt.testTarget(master, "I@nova:compute ${tgt_extra}")) {
+        salt.runSaltProcessStep(master, "I@nova:compute ${tgt_extra}", 'service.restart', ['nova-compute'])
     }
-    if (salt.testTarget(master, 'I@ironic:client')) {
-        salt.enforceState(master, 'I@ironic:client', 'ironic.client', true)
+
+    if (salt.testTarget(master, "I@baremetal_simulator:enabled ${tgt_extra}")) {
+        salt.enforceState(master, "I@baremetal_simulator:enabled ${tgt_extra}", 'baremetal_simulator', true)
+    }
+    if (salt.testTarget(master, "I@ironic:client ${tgt_extra}")) {
+        salt.enforceState(master, "I@ironic:client ${tgt_extra}", 'ironic.client', true)
     }
 }
 
 
 
-def installOpenstackNetwork(master, physical = "false") {
+def installOpenstackNetwork(master, physical = "false", tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
-    salt.runSaltProcessStep(master, 'I@neutron:gateway', 'state.apply', [], null, true)
+    salt.runSaltProcessStep(master, "I@neutron:gateway ${tgt_extra}", 'state.apply', [], null, true)
 
     // install octavia manager services
-    if (salt.testTarget(master, 'I@octavia:manager')) {
-        salt.runSaltProcessStep(master, 'I@salt:master', 'mine.update', ['*'], null, true)
-        salt.enforceState(master, 'I@octavia:manager', 'octavia', true)
-        salt.enforceState(master, 'I@octavia:manager', 'salt.minion.ca', true)
-        salt.enforceState(master, 'I@octavia:manager', 'salt.minion.cert', true)
+    if (salt.testTarget(master, "I@octavia:manager ${tgt_extra}")) {
+        salt.runSaltProcessStep(master, "I@salt:master ${tgt_extra}", 'mine.update', ['*'], null, true)
+        salt.enforceState(master, "I@octavia:manager ${tgt_extra}", 'octavia', true)
+        salt.enforceState(master, "I@octavia:manager ${tgt_extra}", 'salt.minion.ca', true)
+        salt.enforceState(master, "I@octavia:manager ${tgt_extra}", 'salt.minion.cert', true)
     }
 }
 
 
-def installOpenstackCompute(master) {
+def installOpenstackCompute(master, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
     // Configure compute nodes
     retry(2) {
-        salt.runSaltProcessStep(master, 'I@nova:compute', 'state.highstate', ['exclude=opencontrail.client'], null, true)
+        salt.runSaltProcessStep(master, "I@nova:compute ${tgt_extra}", 'state.highstate', ['exclude=opencontrail.client'], null, true)
     }
 }
 
 
-def installContrailNetwork(master) {
+def installContrailNetwork(master, tgt_extra=null) {
     def common = new com.mirantis.mk.Common()
     def salt = new com.mirantis.mk.Salt()
 
@@ -387,16 +387,16 @@ def installContrailNetwork(master) {
     // Install opencontrail database services
     //runSaltProcessStep(master, 'I@opencontrail:database', 'state.sls', ['opencontrail.database'], 1)
     if(env["ASK_ON_ERROR"] && env["ASK_ON_ERROR"] == "true"){
-        salt.enforceState(master, 'I@opencontrail:database and *01*', 'opencontrail.database', true)
-        salt.enforceState(master, 'I@opencontrail:database', 'opencontrail.database', true)
+        salt.enforceState(master, "I@opencontrail:database and *01* ${tgt_extra}", 'opencontrail.database', true)
+        salt.enforceState(master, "I@opencontrail:database ${tgt_extra}", 'opencontrail.database', true)
     }else{
         try {
-            salt.enforceState(master, 'I@opencontrail:database and *01*', 'opencontrail.database', true)
+            salt.enforceState(master, "I@opencontrail:database and *01* ${tgt_extra}", 'opencontrail.database', true)
         } catch (Exception e) {
             common.warningMsg('Exception in state opencontrail.database on I@opencontrail:database and *01*')
         }
         try {
-            salt.enforceState(master, 'I@opencontrail:database and *01*', 'opencontrail.database', true)
+            salt.enforceState(master, "I@opencontrail:database and *01* ${tgt_extra}", 'opencontrail.database', true)
         } catch (Exception e) {
             common.warningMsg('Exception in state opencontrail.database on I@opencontrail:database')
         }
@@ -404,30 +404,30 @@ def installContrailNetwork(master) {
 
     // Install opencontrail control services
     //runSaltProcessStep(master, 'I@opencontrail:control', 'state.sls', ['opencontrail'], 1)
-    salt.runSaltProcessStep(master, 'I@opencontrail:control and *01*', 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
-    salt.runSaltProcessStep(master, 'I@opencontrail:control', 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
-    salt.runSaltProcessStep(master, 'I@opencontrail:collector', 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
+    salt.runSaltProcessStep(master, "I@opencontrail:control and *01* ${tgt_extra}", 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
+    salt.runSaltProcessStep(master, "I@opencontrail:control ${tgt_extra}", 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
+    salt.runSaltProcessStep(master, "I@opencontrail:collector ${tgt_extra}", 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
 
-    if (salt.testTarget(master, 'I@docker:client and I@opencontrail:control')) {
-        salt.enforceState(master, 'I@opencontrail:control or I@opencontrail:collector', 'docker.client', true)
+    if (salt.testTarget(master, "I@docker:client and I@opencontrail:control ${tgt_extra}")) {
+        salt.enforceState(master, "I@opencontrail:control or I@opencontrail:collector ${tgt_extra}", 'docker.client', true)
     }
 }
 
 
-def installContrailCompute(master) {
+def installContrailCompute(master, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
     // Configure compute nodes
     // Provision opencontrail control services
-    salt.enforceState(master, 'I@opencontrail:database:id:1', 'opencontrail.client', true)
+    salt.enforceState(master, "I@opencontrail:database:id:1 ${tgt_extra}", 'opencontrail.client', true)
     // Provision opencontrail virtual routers
 
     // Generate script /usr/lib/contrail/if-vhost0 for up vhost0
     if(env["ASK_ON_ERROR"] && env["ASK_ON_ERROR"] == "true"){
-        salt.runSaltProcessStep(master, 'I@opencontrail:compute', 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
+        salt.runSaltProcessStep(master, "I@opencontrail:compute ${tgt_extra}", 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
     }else{
         try {
-            salt.runSaltProcessStep(master, 'I@opencontrail:compute', 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
+            salt.runSaltProcessStep(master, "I@opencontrail:compute ${tgt_extra}", 'state.sls', ['opencontrail', 'exclude=opencontrail.client'])
         } catch (Exception e) {
             common.warningMsg('Exception in state opencontrail on I@opencontrail:compute')
         }
@@ -443,37 +443,37 @@ def installContrailCompute(master) {
 }
 
 
-def installKubernetesInfra(master) {
+def installKubernetesInfra(master, tgt_extra=null) {
     def orchestrate = new com.mirantis.mk.Orchestrate()
     // THIS FUNCTION IS LEGACY, PLEASE USE installInfra directly
-    orchestrate.installInfra(master)
+    orchestrate.installInfra(master, tgt_extra)
 }
 
 
-def installKubernetesControl(master) {
+def installKubernetesControl(master, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
     // Install Kubernetes pool and Calico
-    salt.enforceState(master, 'I@kubernetes:master', 'kubernetes.master.kube-addons')
-    salt.enforceState(master, 'I@kubernetes:pool', 'kubernetes.pool')
+    salt.enforceState(master, "I@kubernetes:master ${tgt_extra}", 'kubernetes.master.kube-addons')
+    salt.enforceState(master, "I@kubernetes:pool ${tgt_extra}", 'kubernetes.pool')
 
-    if (salt.testTarget(master, 'I@etcd:server:setup')) {
+    if (salt.testTarget(master, "I@etcd:server:setup ${tgt_extra}")) {
         // Setup etcd server
-        salt.enforceState(master, 'I@kubernetes:master and *01*', 'etcd.server.setup')
+        salt.enforceState(master, "I@kubernetes:master and *01* ${tgt_extra}", 'etcd.server.setup')
     }
 
     // Run k8s without master.setup
-    salt.runSaltProcessStep(master, 'I@kubernetes:master', 'state.sls', ['kubernetes', 'exclude=kubernetes.master.setup'])
+    salt.runSaltProcessStep(master, "I@kubernetes:master ${tgt_extra}", 'state.sls', ['kubernetes', 'exclude=kubernetes.master.setup'])
 
     // Run k8s master setup
-    salt.enforceState(master, 'I@kubernetes:master and *01*', 'kubernetes.master.setup')
+    salt.enforceState(master, "I@kubernetes:master and *01* ${tgt_extra}", 'kubernetes.master.setup')
 
     // Restart kubelet
-    salt.runSaltProcessStep(master, 'I@kubernetes:pool', 'service.restart', ['kubelet'])
+    salt.runSaltProcessStep(master, "I@kubernetes:pool ${tgt_extra}", 'service.restart', ['kubelet'])
 }
 
 
-def installKubernetesCompute(master) {
+def installKubernetesCompute(master, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
     // Refresh minion's pillar data
@@ -481,22 +481,22 @@ def installKubernetesCompute(master) {
     salt.runSaltProcessStep(master, '*', 'saltutil.sync_all', [], null, true)
 
     // Bootstrap all nodes
-    salt.enforceState(master, 'I@kubernetes:pool', 'linux')
-    salt.enforceState(master, 'I@kubernetes:pool', 'salt.minion')
-    salt.enforceState(master, 'I@kubernetes:pool', ['openssh', 'ntp'])
+    salt.enforceState(master, "I@kubernetes:pool ${tgt_extra}", 'linux')
+    salt.enforceState(master, "I@kubernetes:pool ${tgt_extra}", 'salt.minion')
+    salt.enforceState(master, "I@kubernetes:pool ${tgt_extra}", ['openssh', 'ntp'])
 
     // Create and distribute SSL certificates for services using salt state
-    salt.enforceState(master, 'I@kubernetes:pool', 'salt.minion.cert')
+    salt.enforceState(master, "I@kubernetes:pool ${tgt_extra}", 'salt.minion.cert')
 
     // Install docker
-    salt.enforceState(master, 'I@docker:host', 'docker.host')
+    salt.enforceState(master, "I@docker:host ${tgt_extra}", 'docker.host')
 
     // Install Kubernetes and Calico
-    salt.enforceState(master, 'I@kubernetes:pool', 'kubernetes.pool')
+    salt.enforceState(master, "I@kubernetes:pool ${tgt_extra}", 'kubernetes.pool')
 
     // Install Tiller and all configured releases
-    if (salt.testTarget(master, 'I@helm:client')) {
-        salt.enforceState(master, 'I@helm:client', 'helm')
+    if (salt.testTarget(master, "I@helm:client ${tgt_extra}")) {
+        salt.enforceState(master, "I@helm:client ${tgt_extra}", 'helm')
     }
 }
 
@@ -778,39 +778,39 @@ def installStacklightv1Client(master) {
 // Ceph
 //
 
-def installCephMon(master, target='I@ceph:mon') {
+def installCephMon(master, target='I@ceph:mon', tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
-    salt.enforceState(master, 'I@ceph:common', 'salt.minion.grains', true)
+    salt.enforceState(master, "I@ceph:common ${tgt_extra}", 'salt.minion.grains', true)
 
     // generate keyrings
-    if (salt.testTarget(master, 'I@ceph:mon:keyring:mon or I@ceph:common:keyring:admin')) {
-        salt.enforceState(master, 'I@ceph:mon:keyring:mon or I@ceph:common:keyring:admin', 'ceph.mon', true)
-        salt.runSaltProcessStep(master, 'I@ceph:mon', 'saltutil.sync_grains', [], null, true)
-        salt.runSaltProcessStep(master, 'I@ceph:mon:keyring:mon or I@ceph:common:keyring:admin', 'mine.update', [], null, true)
+    if (salt.testTarget(master, "I@ceph:mon:keyring:mon or I@ceph:common:keyring:admin ${tgt_extra}")) {
+        salt.enforceState(master, "I@ceph:mon:keyring:mon or I@ceph:common:keyring:admin ${tgt_extra}", 'ceph.mon', true)
+        salt.runSaltProcessStep(master, "I@ceph:mon ${tgt_extra}", 'saltutil.sync_grains', [], null, true)
+        salt.runSaltProcessStep(master, "I@ceph:mon:keyring:mon or I@ceph:common:keyring:admin ${tgt_extra}", 'mine.update', [], null, true)
         sleep(5)
     }
     // install Ceph Mons
     salt.enforceState(master, target, 'ceph.mon', true)
-    if (salt.testTarget(master, 'I@ceph:mgr')) {
-        salt.enforceState(master, 'I@ceph:mgr', 'ceph.mgr', true)
+    if (salt.testTarget(master, "I@ceph:mgr ${tgt_extra}")) {
+        salt.enforceState(master, "I@ceph:mgr ${tgt_extra}", 'ceph.mgr', true)
     }
 }
 
-def installCephOsd(master, target='I@ceph:osd', setup=true) {
+def installCephOsd(master, target='I@ceph:osd', setup=true, tgt_extra=null) {
     def salt = new com.mirantis.mk.Salt()
 
     // install Ceph OSDs
     salt.enforceState(master, target, 'ceph.osd', true)
-    salt.runSaltProcessStep(master, 'I@ceph:osd', 'saltutil.sync_grains', [], null, true)
+    salt.runSaltProcessStep(master, "I@ceph:osd ${tgt_extra}", 'saltutil.sync_grains', [], null, true)
     salt.enforceState(master, target, 'ceph.osd.custom', true)
-    salt.runSaltProcessStep(master, 'I@ceph:osd', 'saltutil.sync_grains', [], null, true)
-    salt.runSaltProcessStep(master, 'I@ceph:osd', 'mine.update', [], null, true)
+    salt.runSaltProcessStep(master, "I@ceph:osd ${tgt_extra}", 'saltutil.sync_grains', [], null, true)
+    salt.runSaltProcessStep(master, "I@ceph:osd ${tgt_extra}", 'mine.update', [], null, true)
 
     // setup pools, keyrings and maybe crush
-    if (salt.testTarget(master, 'I@ceph:setup') && setup) {
+    if (salt.testTarget(master, "I@ceph:setup ${tgt_extra}") && setup) {
         sleep(5)
-        salt.enforceState(master, 'I@ceph:setup', 'ceph.setup', true)
+        salt.enforceState(master, "I@ceph:setup ${tgt_extra}", 'ceph.setup', true)
     }
 }
 
