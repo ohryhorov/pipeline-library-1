@@ -30,6 +30,36 @@ def runConformanceTests(master, target, k8s_api, image, timeout=2400) {
     print("Conformance test output saved in " + outfile)
 }
 
+
+/**
+ * Upload conformance results to cfg node
+ *
+ * @param target        Kubernetes node for copy test results
+ * @param artifacts_dir Path with test results
+ */
+def CopyConformanceResults(master, target, artifacts_dir, output_file) {
+    def salt = new com.mirantis.mk.Salt()
+    def containerName = 'conformance_tests'
+    def test_node = target.replace("*", "")
+
+    out = salt.runSaltProcessStep(master, target, 'cmd.run', ["docker cp ${containerName}:/report /tmp"])
+    if (! out['return'][0].values()[0].contains('Error')) {
+        print("Copy XML test results for junit artifacts...")
+        salt.runSaltProcessStep(master, target, 'cmd.run', ["tar -cf /tmp/${output_file} -C /tmp/report  ."])
+
+        writeFile file: "${artifacts_dir}${output_file}", text: salt.getFileContent(master,
+                              target, "/tmp/${output_file}")
+
+        sh "mkdir -p ${artifacts_dir}/conformance_tests"
+        sh "tar -xf ${artifacts_dir}${output_file} -C ${artifacts_dir}/conformance_tests"
+
+        // collect artifacts
+        archiveArtifacts artifacts: "${artifacts_dir}${output_file}"
+
+        junit(keepLongStdio: true, testResults:  "${artifacts_dir}conformance_tests/**.xml")
+    }
+}
+
 /**
  * Copy test output to cfg node
  *
@@ -55,14 +85,14 @@ def copyTestsOutput(master, image) {
  * @param localKeystone     Path to the keystonerc file in the local host
  * @param localLogDir       Path to local destination folder for logs
  */
-def runTempestTests(master, dockerImageLink, target, pattern = "false", logDir = "/home/rally/rally_reports/",
+def runTempestTests(master, dockerImageLink, target, pattern = "", logDir = "/home/rally/rally_reports/",
                     sourceFile="/home/rally/keystonercv3", set="full", concurrency="0", tempestConf="mcp.conf",
                     skipList="mcp_skip.list", localKeystone="/root/keystonercv3" , localLogDir="/root/rally_reports",
                     doCleanupResources = "false") {
     def salt = new com.mirantis.mk.Salt()
     salt.runSaltProcessStep(master, target, 'file.mkdir', ["${localLogDir}"])
     def custom = ''
-    if (pattern != "false") {
+    if (pattern) {
         custom = "--pattern " + pattern
     }
     salt.cmdRun(master, "${target}", "docker run --rm --net=host " +

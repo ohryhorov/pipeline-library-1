@@ -72,7 +72,7 @@ def diffPublish(server, source, target, components=null, opts='--timeout 600') {
     sh("aptly-publisher --dry --url ${server} promote --source ${source} --target ${target} --diff ${opts}")
 }
 
-def promotePublish(server, source, target, recreate=false, components=null, packages=null, diff=false, opts='-d --timeout 600', dump_publish=false) {
+def promotePublish(server, source, target, recreate=false, components=null, packages=null, diff=false, opts='-d --timeout 600', dump_publish=false, storage="") {
     if (components && components != "all" && components != "") {
         def componentsStr = components.replaceAll(",", " ")
         opts = "${opts} --components ${componentsStr}"
@@ -88,21 +88,40 @@ def promotePublish(server, source, target, recreate=false, components=null, pack
         opts = "${opts} --dry --diff"
     }
 
-    if (dump_publish) {
-        def now = new Date();
-        def timestamp = now.format("yyyyMMddHHmmss", TimeZone.getTimeZone('UTC'));
-        dumpPublishes(server, timestamp, target)
+    if (storage && storage != "") {
+        opts = "${opts} --storage ${storage}"
     }
 
-    sh("aptly-publisher --url ${server} promote --source ${source} --target ${target} --force-overwrite ${opts}")
+    if (dump_publish) {
+        def now = new Date();
+        dumpTarget = target
+        def timestamp = now.format("yyyyMMddHHmmss", TimeZone.getTimeZone('UTC'));
+
+        if (source.contains(')') || source.contains('*')) {
+            sourceTarget = source.split('/')
+            dumpTarget = target.split('/')[-1]
+            sourceTarget[-1] = dumpTarget
+            dumpTarget = sourceTarget.join('/')
+        }
+
+        dumpPublishes(server, timestamp, dumpTarget)
+    }
+
+    sh("aptly-publisher --url ${server} promote --acquire-by-hash --source '${source}' --target '${target}' --force-overwrite ${opts}")
 
 }
 
-def publish(server, config='/etc/aptly-publisher.yaml', recreate=false, opts='-d --timeout 600') {
+def publish(server, config='/etc/aptly-publisher.yaml', recreate=false, only_latest=true, force_overwrite=true, opts='-d --timeout 3600') {
     if (recreate == true) {
         opts = "${opts} --recreate"
     }
-    sh("aptly-publisher --url ${server} -c ${config} ${opts} --force-overwrite publish")
+    if (only_latest == true) {
+        opts = "${opts} --only-latest"
+    }
+    if (force_overwrite == true) {
+        opts = "${opts} --force-overwrite"
+    }
+    sh("aptly-publisher --url ${server} -c ${config} ${opts} --acquire-by-hash publish")
 }
 
 /**
@@ -115,7 +134,7 @@ def publish(server, config='/etc/aptly-publisher.yaml', recreate=false, opts='-d
  * @param opts          Options: debug, timeout, ...
  */
 def dumpPublishes(server, prefix, publishes='all', opts='-d --timeout 600') {
-    sh("aptly-publisher dump --url ${server} --save-dir . --prefix ${prefix} -p ${publishes} ${opts}")
+    sh("aptly-publisher dump --url ${server} --save-dir . --prefix ${prefix} -p '${publishes}' ${opts}")
     archiveArtifacts artifacts: "${prefix}*"
 }
 

@@ -170,6 +170,7 @@ def enforceState(saltId, target, state, output = true, failOnError = true, batch
             out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, [run_states], kwargs, -1, read_timeout)
             checkResult(out, failOnError, output)
         }
+        waitForMinion(out)
         return out
     } else {
         common.infoMsg("No Minions matched the target given, but 'optional' param was set to true - Pipeline continues. ")
@@ -184,16 +185,20 @@ def enforceState(saltId, target, state, output = true, failOnError = true, batch
  * @param checkResponse test command success execution (default true)
  * @param batch salt batch parameter integer or string with percents (optional, default null - disable batch)
  * @param output do you want to print output
+ * @param saltArgs additional salt args eq. ["runas=aptly"]
  * @return output of salt command
  */
-def cmdRun(saltId, target, cmd, checkResponse = true, batch=null, output = true) {
+def cmdRun(saltId, target, cmd, checkResponse = true, batch=null, output = true, saltArgs = []) {
     def common = new com.mirantis.mk.Common()
     def originalCmd = cmd
     common.infoMsg("Running command ${cmd} on ${target}")
     if (checkResponse) {
       cmd = cmd + " && echo Salt command execution success"
     }
-    def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.run', batch, [cmd])
+
+    saltArgs << cmd
+
+    def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.run', batch, saltArgs.reverse())
     if (checkResponse) {
         // iterate over all affected nodes and check success return code
         if (out["return"]){
@@ -592,6 +597,59 @@ def checkResult(result, failOnError = true, printResults = true, printOnlyChange
 }
 
 /**
+* Parse salt API output to check minion restart and wait some time to be sure minion is up.
+* See https://mirantis.jira.com/browse/PROD-16258 for more details
+* TODO: change sleep to more tricky procedure.
+*
+* @param result    Parsed response of Salt API
+*/
+def waitForMinion(result) {
+    def common = new com.mirantis.mk.Common()
+    //In order to prevent multiple sleeps use bool variable to catch restart for any minion.
+    def isMinionRestarted = false
+    if(result != null){
+        if(result['return']){
+            for (int i=0;i<result['return'].size();i++) {
+                def entry = result['return'][i]
+                // exit in case of empty response.
+                if (!entry) {
+                    return
+                }
+                // Loop for nodes
+                for (int j=0;j<entry.size();j++) {
+                    def nodeKey = entry.keySet()[j]
+                    def node=entry[nodeKey]
+                    if(node instanceof Map || node instanceof List){
+                        // Loop for node resources
+                        for (int k=0;k<node.size();k++) {
+                            def resource;
+                            def resKey;
+                            if(node instanceof Map){
+                                resKey = node.keySet()[k]
+                            }else if(node instanceof List){
+                                resKey = k
+                            }
+                            resource = node[resKey]
+                            if(resKey.contains("salt_minion_service_restart") && resource instanceof Map && resource.keySet().contains("result")){
+                                if((resource["result"] instanceof Boolean && resource["result"]) || (resource["result"] instanceof String && resource["result"] == "true")){
+                                    if(resource.changes.size() > 0){
+                                        isMinionRestarted=true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (isMinionRestarted){
+        common.infoMsg("Salt minion service restart detected. Sleep 10 seconds to wait minion restart")
+        sleep(10)
+    }
+}
+
+/**
  * Print salt command run results in human-friendly form
  *
  * @param result        Parsed response of Salt API
@@ -647,7 +705,7 @@ def setSaltOverrides(saltId, salt_overrides, reclass_dir="/srv/salt/reclass") {
          def value = entry[1]
 
          common.debugMsg("Set salt override ${key}=${value}")
-         runSaltProcessStep(saltId, 'I@salt:master', 'reclass.cluster_meta_set', ["${key}", "${value}"], false)
+         runSaltProcessStep(saltId, 'I@salt:master', 'reclass.cluster_meta_set', [key, value], false)
     }
     runSaltProcessStep(saltId, 'I@salt:master', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
 }
@@ -661,15 +719,16 @@ def setSaltOverrides(saltId, salt_overrides, reclass_dir="/srv/salt/reclass") {
 */
 
 def runPepperCommand(data, venv)   {
+    def common = new com.mirantis.mk.Common()
     def python = new com.mirantis.mk.Python()
     def dataStr = new groovy.json.JsonBuilder(data).toString()
 
-    pepperCmdFile = "${venv}/pepper-cmd.json"
+    def pepperCmdFile = "${venv}/pepper-cmd.json"
     writeFile file: pepperCmdFile, text: dataStr
     def pepperCmd = "pepper -c ${venv}/pepperrc --make-token -x ${venv}/.peppercache --json-file ${pepperCmdFile}"
 
     if (venv) {
-        output = python.runVirtualenvCommand(venv, pepperCmd)
+        output = python.runVirtualenvCommand(venv, pepperCmd, true)
     } else {
         echo("[Command]: ${pepperCmd}")
         output = sh (
@@ -678,5 +737,12 @@ def runPepperCommand(data, venv)   {
         ).trim()
     }
 
-    return new groovy.json.JsonSlurperClassic().parseText(output)
+    def outputObj
+    try {
+       outputObj = new groovy.json.JsonSlurperClassic().parseText(output)
+    } catch(Exception e) {
+       common.errorMsg("Parsing Salt API JSON response failed! Response: " + output)
+       throw e
+    }
+    return outputObj
 }

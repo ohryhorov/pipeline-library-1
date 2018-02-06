@@ -26,9 +26,15 @@ def getDatetime(format="yyyyMMddHHmmss") {
  * Currently implemented by calling pwd so it won't return relevant result in
  * dir context
  */
-def getWorkspace() {
+def getWorkspace(includeBuildNum=false) {
     def workspace = sh script: 'pwd', returnStdout: true
     workspace = workspace.trim()
+    if(includeBuildNum){
+       if(!workspace.endsWith("/")){
+          workspace += "/"
+       }
+       workspace += env.BUILD_NUMBER
+    }
     return workspace
 }
 
@@ -55,30 +61,51 @@ def getJenkinsGid() {
 }
 
 /**
+ * Returns Jenkins user uid and gid in one list (in that order)
+ * Must be run from context of node
+ */
+def getJenkinsUserIds(){
+    return sh(script: "id -u && id -g", returnStdout: true).tokenize("\n")
+}
+
+/**
+ *
+ * Find credentials by ID
+ *
+ * @param credsId    Credentials ID
+ * @param credsType  Credentials type (optional)
+ *
+ */
+def getCredentialsById(String credsId, String credsType = 'any') {
+    def credClasses = [ // ordered by class name
+        sshKey:     com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey.class,
+        cert:       com.cloudbees.plugins.credentials.common.CertificateCredentials.class,
+        password:   com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials.class,
+        any:        com.cloudbees.plugins.credentials.impl.BaseStandardCredentials.class,
+        dockerCert: org.jenkinsci.plugins.docker.commons.credentials.DockerServerCredentials.class,
+        file:       org.jenkinsci.plugins.plaincredentials.FileCredentials.class,
+        string:     org.jenkinsci.plugins.plaincredentials.StringCredentials.class,
+    ]
+    return com.cloudbees.plugins.credentials.CredentialsProvider.lookupCredentials(
+        credClasses[credsType],
+        jenkins.model.Jenkins.instance
+    ).findAll {cred -> cred.id == credsId}[0]
+}
+
+/**
  * Get credentials from store
  *
  * @param id    Credentials name
  */
 def getCredentials(id, cred_type = "username_password") {
-    def credClass;
-    if(cred_type == "username_password"){
-        credClass = com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials.class
-    }else if(cred_type == "key"){
-        credClass = com.cloudbees.jenkins.plugins.sshcredentials.impl.BasicSSHUserPrivateKey.class
-    }
-    def creds = com.cloudbees.plugins.credentials.CredentialsProvider.lookupCredentials(
-                    credClass,
-                    jenkins.model.Jenkins.instance
-                )
+    warningMsg('You are using obsolete function. Please switch to use `getCredentialsById()`')
 
-    for (Iterator<String> credsIter = creds.iterator(); credsIter.hasNext();) {
-        c = credsIter.next();
-        if ( c.id == id ) {
-            return c;
-        }
-    }
+    type_map = [
+        username_password: 'password',
+        key:               'sshKey',
+    ]
 
-    throw new Exception("Could not find credentials for ID ${id}")
+    return getCredentialsById(id, type_map[cred_type])
 }
 
 /**
@@ -258,19 +285,7 @@ def partitionList(inputList, partitionSize=5){
  * @param id    Credentials name
  */
 def getPasswordCredentials(id) {
-    def creds = com.cloudbees.plugins.credentials.CredentialsProvider.lookupCredentials(
-                    com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials.class,
-                    jenkins.model.Jenkins.instance
-                )
-
-    for (Iterator<String> credsIter = creds.iterator(); credsIter.hasNext();) {
-        c = credsIter.next();
-        if ( c.id == id ) {
-            return c;
-        }
-    }
-
-    throw new Exception("Could not find credentials for ID ${id}")
+    return getCredentialsById(id, 'password')
 }
 
 /**
@@ -279,19 +294,7 @@ def getPasswordCredentials(id) {
  * @param id    Credentials name
  */
 def getSshCredentials(id) {
-    def creds = com.cloudbees.plugins.credentials.CredentialsProvider.lookupCredentials(
-                    com.cloudbees.plugins.credentials.common.StandardUsernameCredentials.class,
-                    jenkins.model.Jenkins.instance
-                )
-
-    for (Iterator<String> credsIter = creds.iterator(); credsIter.hasNext();) {
-        c = credsIter.next();
-        if ( c.id == id ) {
-            return c;
-        }
-    }
-
-    throw new Exception("Could not find credentials for ID ${id}")
+    return getCredentialsById(id, 'sshKey')
 }
 
 /**
@@ -458,4 +461,55 @@ def validInputParam(paramName){
 @NonCPS
 def countHashMapEquals(lm, param, eq) {
     return lm.stream().filter{i -> i[param].equals(eq)}.collect(java.util.stream.Collectors.counting())
+}
+
+/**
+ * Execute shell command and return stdout, stderr and status
+ *
+ * @param cmd Command to execute
+ * @return map with stdout, stderr, status keys
+ */
+
+def shCmdStatus(cmd) {
+    def res = [:]
+    def stderr = sh(script: 'mktemp', returnStdout: true).trim()
+    def stdout = sh(script: 'mktemp', returnStdout: true).trim()
+
+    try {
+        def status = sh(script:"${cmd} 1>${stdout} 2>${stderr}", returnStatus: true)
+        res['stderr'] = sh(script: "cat ${stderr}", returnStdout: true)
+        res['stdout'] = sh(script: "cat ${stdout}", returnStdout: true)
+        res['status'] = status
+    } finally {
+        sh(script: "rm ${stderr}", returnStdout: true)
+        sh(script: "rm ${stdout}", returnStdout: true)
+    }
+
+    return res
+}
+
+
+/**
+ * Retry commands passed to body
+ *
+ * @param times Number of retries
+ * @param delay Delay between retries
+ * @param body Commands to be in retry block
+ * @return calling commands in body
+ * @example retry(3,5){ function body }
+ *          retry{ function body }
+ */
+
+def retry(int times = 5, int delay = 0, Closure body) {
+    int retries = 0
+    def exceptions = []
+    while(retries++ < times) {
+        try {
+            return body.call()
+        } catch(e) {
+            sleep(delay)
+        }
+    }
+    currentBuild.result = "FAILURE"
+    throw new Exception("Failed after $times retries")
 }

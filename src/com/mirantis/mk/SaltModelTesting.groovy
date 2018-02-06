@@ -18,7 +18,8 @@ package com.mirantis.mk
  */
 
 def setupAndTestNode(masterName, clusterName, extraFormulas, testDir, formulasSource = 'pkg', formulasRevision = 'stable', dockerMaxCpus = 0, ignoreClassNotfound = false, legacyTestingMode = false, aptRepoUrl='', aptRepoGPG='') {
-
+  // timeout for test execution (40min)
+  def testTimeout = 40 * 60
   def saltOpts = "--retcode-passthrough --force-color"
   def common = new com.mirantis.mk.Common()
   def workspace = common.getWorkspace()
@@ -58,16 +59,27 @@ def setupAndTestNode(masterName, clusterName, extraFormulas, testDir, formulasSo
             "APT_REPOSITORY_GPG=${aptRepoGPG}"]){
 
         if (!imageFound) {
+          sh("cd /srv/salt && find . -type f \\( -name '*.yml' -or -name '*.sh' \\) -exec sed -i 's/apt-mk.mirantis.com/apt.mirantis.net:8085/g' {} \\;")
+          sh("cd /srv/salt && find . -type f \\( -name '*.yml' -or -name '*.sh' \\) -exec sed -i 's/apt.mirantis.com/apt.mirantis.net:8085/g' {} \\;")
           sh("bash -c 'source /srv/salt/scripts/bootstrap.sh; cd /srv/salt/scripts && source_local_envs && system_config_master'")
           sh("bash -c 'source /srv/salt/scripts/bootstrap.sh; cd /srv/salt/scripts && source_local_envs && saltmaster_bootstrap'")
+          sh("""for s in \$(python -c \"import site; print(' '.join(site.getsitepackages()))\"); do
+                    sudo -H pip install --install-option=\"--prefix=\" --upgrade --force-reinstall -I \
+                      -t \"\$s\" git+https://github.com/salt-formulas/reclass.git;
+                  done""")
         } else {
           sh("cp -r ${testDir}/* /srv/salt/reclass && echo '127.0.1.2  salt' >> /etc/hosts")
-          sh("bash -c 'source /srv/salt/scripts/bootstrap.sh; cd /srv/salt/scripts && source_local_envs && configure_salt_master && configure_salt_minion && install_salt_formula_pkg'")
-          sh("(pgrep salt-master | sed /\$\$/d | xargs --no-run-if-empty -i{} kill -9 {} || true) && pkill -9 salt-minion || true")
-          sh("service salt-master restart && service salt-minion restart && sleep 15")
+          sh("cd /srv/salt && find . -type f \\( -name '*.yml' -or -name '*.sh' \\) -exec sed -i 's/apt-mk.mirantis.com/apt.mirantis.net:8085/g' {} \\;")
+          sh("cd /srv/salt && find . -type f \\( -name '*.yml' -or -name '*.sh' \\) -exec sed -i 's/apt.mirantis.com/apt.mirantis.net:8085/g' {} \\;")
+          sh("""for s in \$(python -c \"import site; print(' '.join(site.getsitepackages()))\"); do
+                    sudo -H pip install --install-option=\"--prefix=\" --upgrade --force-reinstall -I \
+                      -t \"\$s\" git+https://github.com/salt-formulas/reclass.git;
+                  done""")
+          sh("timeout ${testTimeout} bash -c 'source /srv/salt/scripts/bootstrap.sh; cd /srv/salt/scripts && source_local_envs && configure_salt_master && configure_salt_minion && install_salt_formula_pkg'")
+          sh("bash -c 'source /srv/salt/scripts/bootstrap.sh; cd /srv/salt/scripts && saltservice_restart'")
         }
 
-        sh("bash -c 'source /srv/salt/scripts/bootstrap.sh; cd /srv/salt/scripts && source_local_envs && saltmaster_init'")
+        sh("timeout ${testTimeout} bash -c 'source /srv/salt/scripts/bootstrap.sh; cd /srv/salt/scripts && source_local_envs && saltmaster_init'")
 
         if (!legacyTestingMode) {
            sh("bash -c 'source /srv/salt/scripts/bootstrap.sh; cd /srv/salt/scripts && verify_salt_minions'")

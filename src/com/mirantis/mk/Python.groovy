@@ -17,6 +17,7 @@ package com.mirantis.mk
 def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=false, useSystemPackages=false) {
     def common = new com.mirantis.mk.Common()
 
+    def offlineDeployment = env.getEnvironment().containsKey("OFFLINE_DEPLOYMENT") && env["OFFLINE_DEPLOYMENT"].toBoolean()
     def virtualenv_cmd = "virtualenv ${path} --python ${python}"
     if (useSystemPackages){
         virtualenv_cmd += " --system-site-packages"
@@ -26,12 +27,17 @@ def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=fal
         sh("rm -rf \"${path}\"")
     }
 
+    if(offlineDeployment){
+       virtualenv_cmd+=" --no-download"
+    }
     common.infoMsg("[Python ${path}] Setup ${python} environment")
     sh(returnStdout: true, script: virtualenv_cmd)
-    try {
-        runVirtualenvCommand(path, "wget -q -T 3 --spider http://google.com && pip install -U setuptools pip")
-    } catch(Exception e) {
-        common.warningMsg("Setuptools and pip cannot be updated, you might be offline")
+    if(!offlineDeployment){
+      try {
+          runVirtualenvCommand(path, "pip install -U setuptools pip")
+      } catch(Exception e) {
+          common.warningMsg("Setuptools and pip cannot be updated, you might be offline but OFFLINE_DEPLOYMENT global property not initialized!")
+      }
     }
     if (reqs_path==null) {
         def args = ""
@@ -41,7 +47,7 @@ def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=fal
         writeFile file: "${path}/requirements.txt", text: args
         reqs_path = "${path}/requirements.txt"
     }
-    runVirtualenvCommand(path, "pip install -r ${reqs_path}")
+    runVirtualenvCommand(path, "pip install -r ${reqs_path}", true)
 }
 
 /**
@@ -49,12 +55,15 @@ def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=fal
  *
  * @param path   Path to virtualenv
  * @param cmd    Command to be executed
+ * @param silent dont print any messages (optional, default false)
  */
-def runVirtualenvCommand(path, cmd) {
+def runVirtualenvCommand(path, cmd, silent=false) {
     def common = new com.mirantis.mk.Common()
 
-    virtualenv_cmd = ". ${path}/bin/activate > /dev/null; ${cmd}"
-    common.infoMsg("[Python ${path}] Run command ${cmd}")
+    virtualenv_cmd = "set +x; . ${path}/bin/activate; ${cmd}"
+    if(!silent){
+        common.infoMsg("[Python ${path}] Run command ${cmd}")
+    }
     output = sh(
         returnStdout: true,
         script: virtualenv_cmd
@@ -302,11 +311,8 @@ def setupPepperVirtualenv(path, url, credentialsId, clean = false) {
     def common = new com.mirantis.mk.Common()
 
     // virtualenv setup
-    // TODO: once pepper changes are in pypi, reenable these lines
-    // requirements = ['salt-pepper']
-    requirements = []
+    requirements = ['salt-pepper>=0.5.2']
     setupVirtualenv(path, 'python2', requirements, null, clean, true)
-    runVirtualenvCommand(path, "pip install git+https://github.com/chnyda/pepper.git")
 
     // pepperrc creation
     rcFile = "${path}/pepperrc"
