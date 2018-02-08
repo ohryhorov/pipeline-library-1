@@ -103,22 +103,17 @@ def installInfra(master, tgt_extra=null) {
     }
 
     // Install galera
-    if (salt.testTarget(master, "I@galera:master ${tgt_extra}") || salt.testTarget(master, 'I@galera:slave')) {
-        withEnv(['ASK_ON_ERROR=false']){
-            retry(2) {
-                salt.enforceState(master, "I@galera:master ${tgt_extra}", 'galera', true)
-            }
-        }
-        salt.enforceState(master, "I@galera:slave ${tgt_extra}", 'galera', true)
+    if (salt.testTarget(master, "I@galera:master ${tgt_extra}") || salt.testTarget(master, "I@galera:slave ${tgt_extra}")) {
+        salt.enforceState(master, "I@galera:master ${tgt_extra}", 'galera', true, true, null, false, -1, 2)
 
         // Check galera status
         salt.runSaltProcessStep(master, "I@galera:master ${tgt_extra}", 'mysql.status')
         salt.runSaltProcessStep(master, "I@galera:slave ${tgt_extra}", 'mysql.status')
     // If galera is not enabled check if we need to install mysql:server
     } else if (salt.testTarget(master, "I@mysql:server ${tgt_extra}")){
-        salt.enforceState(master, "I@mysql:server ${tgt_extra}", 'mysql.server', true)
+        salt.enforceState(master, "I@mysql:server ${tgt_extra}", 'mysql.server')
         if (salt.testTarget(master, "I@mysql:client ${tgt_extra}")){
-            salt.enforceState(master, "I@mysql:client ${tgt_extra}", 'mysql.client', true)
+            salt.enforceState(master, "I@mysql:client ${tgt_extra}", 'mysql.client')
         }
     }
 
