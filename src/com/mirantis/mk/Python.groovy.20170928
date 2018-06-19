@@ -14,31 +14,18 @@ package com.mirantis.mk
  * @param reqs          Environment requirements in list format
  * @param reqs_path     Environment requirements path in str format
  */
-def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=false, useSystemPackages=false) {
+def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=false) {
     def common = new com.mirantis.mk.Common()
 
-    def offlineDeployment = env.getEnvironment().containsKey("OFFLINE_DEPLOYMENT") && env["OFFLINE_DEPLOYMENT"].toBoolean()
     def virtualenv_cmd = "virtualenv ${path} --python ${python}"
-    if (useSystemPackages){
-        virtualenv_cmd += " --system-site-packages"
-    }
+
     if (clean) {
         common.infoMsg("Cleaning venv directory " + path)
         sh("rm -rf \"${path}\"")
     }
 
-    if(offlineDeployment){
-       virtualenv_cmd+=" --no-download"
-    }
     common.infoMsg("[Python ${path}] Setup ${python} environment")
     sh(returnStdout: true, script: virtualenv_cmd)
-    if(!offlineDeployment){
-      try {
-          runVirtualenvCommand(path, "pip install -U setuptools pip")
-      } catch(Exception e) {
-          common.warningMsg("Setuptools and pip cannot be updated, you might be offline but OFFLINE_DEPLOYMENT global property not initialized!")
-      }
-    }
     if (reqs_path==null) {
         def args = ""
         for (req in reqs) {
@@ -47,7 +34,7 @@ def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=fal
         writeFile file: "${path}/requirements.txt", text: args
         reqs_path = "${path}/requirements.txt"
     }
-    runVirtualenvCommand(path, "pip install -r ${reqs_path}", true)
+    runVirtualenvCommand(path, "pip install -r ${reqs_path}")
 }
 
 /**
@@ -55,15 +42,12 @@ def setupVirtualenv(path, python = 'python2', reqs=[], reqs_path=null, clean=fal
  *
  * @param path   Path to virtualenv
  * @param cmd    Command to be executed
- * @param silent dont print any messages (optional, default false)
  */
-def runVirtualenvCommand(path, cmd, silent=false) {
+def runVirtualenvCommand(path, cmd) {
     def common = new com.mirantis.mk.Common()
 
-    virtualenv_cmd = "set +x; . ${path}/bin/activate; ${cmd}"
-    if(!silent){
-        common.infoMsg("[Python ${path}] Run command ${cmd}")
-    }
+    virtualenv_cmd = ". ${path}/bin/activate > /dev/null; ${cmd}"
+    common.infoMsg("[Python ${path}] Run command ${cmd}")
     output = sh(
         returnStdout: true,
         script: virtualenv_cmd
@@ -298,44 +282,4 @@ def jinjaBuildTemplate (template, context, path = none) {
     data = sh (returnStdout: true, script: cmd)
     echo(data)
     return data
-}
-
-/**
- * Install salt-pepper in isolated environment
- *
- * @param path        Path where virtualenv is created
- * @param url         SALT_MASTER_URL
- * @param credentialsId        Credentials to salt api
- */
-def setupPepperVirtualenv(path, url, credentialsId) {
-    def common = new com.mirantis.mk.Common()
-
-    // virtualenv setup
-    // pin pepper till https://mirantis.jira.com/browse/PROD-18188 is fixed
-    requirements = ['salt-pepper>=0.5.2,<0.5.4']
-    setupVirtualenv(path, 'python2', requirements, null, true, true)
-
-    // pepperrc creation
-    rcFile = "${path}/pepperrc"
-    creds = common.getPasswordCredentials(credentialsId)
-    rc = """\
-[main]
-SALTAPI_EAUTH=pam
-SALTAPI_URL=${url}
-SALTAPI_USER=${creds.username}
-SALTAPI_PASS=${creds.password.toString()}
-"""
-    writeFile file: rcFile, text: rc
-    return rcFile
-}
-
-/**
- * Install devops in isolated environment
- *
- * @param path        Path where virtualenv is created
- * @param clean       Define to true is the venv have to cleaned up before install a new one
- */
-def setupDevOpsVenv(venv, clean=false) {
-    requirements = ['git+https://github.com/openstack/fuel-devops.git']
-    setupVirtualenv(venv, 'python2', requirements, null, false, clean)
 }

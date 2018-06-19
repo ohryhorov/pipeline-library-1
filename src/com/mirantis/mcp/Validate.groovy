@@ -155,7 +155,34 @@ def runSanityTests(salt_url, salt_credentials, test_set="", output_dir="validati
         }
     }
     def script = ". ${env.WORKSPACE}/venv/bin/activate; ${settings}" +
-                 "pytest --junitxml ${output_dir}cvp_sanity.xml -sv ${env.WORKSPACE}/cvp-sanity-checks/cvp_checks/tests/${test_set}"
+                 "pytest --junitxml ${output_dir}cvp_sanity.xml --tb=short -sv ${env.WORKSPACE}/cvp-sanity-checks/cvp_checks/tests/${test_set}"
+    withEnv(["SALT_USERNAME=${username}", "SALT_PASSWORD=${password}", "SALT_URL=${salt_url}"]) {
+        def statusCode = sh script:script, returnStatus:true
+    }
+}
+
+/**
+ * Execute pytest framework tests
+ *
+ * @param salt_url          Salt master url
+ * @param salt_credentials  Salt credentials
+ * @param test_set          Test set to run
+ * @param env_vars          Additional environment variables for cvp-sanity-checks
+ * @param output_dir        Directory for results
+ */
+def runTests(salt_url, salt_credentials, test_set="", output_dir="validation_artifacts/", env_vars="") {
+    def common = new com.mirantis.mk.Common()
+    def creds = common.getCredentials(salt_credentials)
+    def username = creds.username
+    def password = creds.password
+    def settings = ""
+    if ( env_vars != "" ) {
+        for (var in env_vars.tokenize(";")) {
+            settings += "export ${var}; "
+        }
+    }
+    def script = ". ${env.WORKSPACE}/venv/bin/activate; ${settings}" +
+                 "pytest --junitxml ${output_dir}report.xml --tb=short -sv ${env.WORKSPACE}/${test_set}"
     withEnv(["SALT_USERNAME=${username}", "SALT_PASSWORD=${password}", "SALT_URL=${salt_url}"]) {
         def statusCode = sh script:script, returnStatus:true
     }
@@ -172,11 +199,11 @@ def runSanityTests(salt_url, salt_credentials, test_set="", output_dir="validati
  * @param confBranch        Git branch which will be used during the checkout
  * @param repository        Git repository with Tempest
  * @param version           Version of Tempest (tag, branch or commit)
+ * @param results           The reports directory
  */
-def runTempestTests(master, target, dockerImageLink, output_dir, confRepository, confBranch, repository, version, pattern = "false") {
+def runTempestTests(master, target, dockerImageLink, output_dir, confRepository, confBranch, repository, version, pattern = "false", results = '/root/qa_results') {
     def salt = new com.mirantis.mk.Salt()
     def output_file = 'docker-tempest.log'
-    def results = '/root/qa_results'
     def dest_folder = '/home/rally/qa_results'
     def skip_list = '--skip-list /opt/devops-qa-tools/deployment/skip_contrail.list'
     salt.runSaltProcessStep(master, target, 'file.remove', ["${results}"])
@@ -218,61 +245,119 @@ def runTempestTests(master, target, dockerImageLink, output_dir, confRepository,
  *
  * @param target            Host to run tests
  * @param dockerImageLink   Docker image link
+ * @param platform          What do we have underneath (openstack/k8s)
  * @param output_dir        Directory for results
  * @param repository        Git repository with files for Rally
  * @param branch            Git branch which will be used during the checkout
+ * @param scenarios         Directory inside repo with specific scenarios
+ * @param tasks_args_file   Argument file that is used for throttling settings
  * @param ext_variables     The list of external variables
+ * @param results           The reports directory
  */
-def runRallyTests(master, target, dockerImageLink, output_dir, repository, branch, scenarios, tasks_args_file, ext_variables = []) {
+def runRallyTests(master, target, dockerImageLink, platform, output_dir, repository, branch, scenarios = '', tasks_args_file = '', ext_variables = [], results = '/root/qa_results') {
     def salt = new com.mirantis.mk.Salt()
     def output_file = 'docker-rally.log'
-    def results = '/root/qa_results'
     def dest_folder = '/home/rally/qa_results'
+    def env_vars = []
+    def rally_extra_args = ''
+    def cmd_rally_init = ''
+    def cmd_rally_checkout = ''
+    def cmd_rally_start = ''
+    def cmd_rally_task_args = ''
+    def cmd_report = "rally task export --type junit-xml --to ${dest_folder}/report-rally.xml; " +
+        "rally task report --out ${dest_folder}/report-rally.html"
     salt.runSaltProcessStep(master, target, 'file.remove', ["${results}"])
     salt.runSaltProcessStep(master, target, 'file.mkdir', ["${results}", "mode=777"])
-    def _pillar = salt.getPillar(master, 'I@keystone:server', 'keystone:server')
-    def keystone = _pillar['return'][0].values()[0]
-    def env_vars = ( ['tempest_version=15.0.0',
-                      "OS_USERNAME=${keystone.admin_name}",
-                      "OS_PASSWORD=${keystone.admin_password}",
-                      "OS_TENANT_NAME=${keystone.admin_tenant}",
-                      "OS_AUTH_URL=http://${keystone.bind.private_address}:${keystone.bind.private_port}/v2.0",
-                      "OS_REGION_NAME=${keystone.region}",
-                      'OS_ENDPOINT_TYPE=admin'] + ext_variables ).join(' -e ')
-    def cmd0 = ''
-    def cmd = '/opt/devops-qa-tools/deployment/configure.sh; ' +
-        'rally task start combined_scenario.yaml ' +
-        '--task-args-file /opt/devops-qa-tools/rally-scenarios/task_arguments.yaml; '
-    if (repository != '' ) {
-        cmd = 'rally deployment create --fromenv --name=existing; ' +
+    if (platform == 'openstack') {
+      def _pillar = salt.getPillar(master, 'I@keystone:server', 'keystone:server')
+      def keystone = _pillar['return'][0].values()[0]
+      env_vars = ( ['tempest_version=15.0.0',
+          "OS_USERNAME=${keystone.admin_name}",
+          "OS_PASSWORD=${keystone.admin_password}",
+          "OS_TENANT_NAME=${keystone.admin_tenant}",
+          "OS_AUTH_URL=http://${keystone.bind.private_address}:${keystone.bind.private_port}/v2.0",
+          "OS_REGION_NAME=${keystone.region}",
+          'OS_ENDPOINT_TYPE=admin'] + ext_variables ).join(' -e ')
+      if (repository == '' ) {
+        cmd_rally_init = ''
+        cmd_rally_start = '/opt/devops-qa-tools/deployment/configure.sh; ' +
+            "rally $rally_extra_args task start combined_scenario.yaml " +
+            '--task-args-file /opt/devops-qa-tools/rally-scenarios/task_arguments.yaml; '
+        cmd_rally_checkout = ''
+      } else {
+        cmd_rally_init = 'rally db create; ' +
+            'rally deployment create --fromenv --name=existing; ' +
             'rally deployment config; '
+        cmd_rally_checkout = "git clone -b ${branch ?: 'master'} ${repository} test_config; "
         if (scenarios == '') {
-          cmd += 'rally task start test_config/rally/scenario.yaml '
+          cmd_rally_start = "rally $rally_extra_args task start test_config/rally/scenario.yaml "
         } else {
-          cmd += "rally task start scenarios.yaml "
-          cmd0 = "git clone -b ${branch ?: 'master'} ${repository} test_config; " +
-                 "if [ -f ${scenarios} ]; then cp ${scenarios} scenarios.yaml; " +
-                 "else " +
-                 "find -L ${scenarios} -name '*.yaml' -exec cat {} >> scenarios.yaml \\; ; " +
-                 "sed -i '/---/d' scenarios.yaml; fi; "
+          cmd_rally_start = "rally $rally_extra_args task start scenarios.yaml "
+          cmd_rally_checkout += "if [ -f ${scenarios} ]; then cp ${scenarios} scenarios.yaml; " +
+              "else " +
+              "find -L ${scenarios} -name '*.yaml' -exec cat {} >> scenarios.yaml \\; ; " +
+              "sed -i '/---/d' scenarios.yaml; fi; "
         }
-        switch(tasks_args_file) {
-          case 'none':
-            cmd += '; '
-            break
-          case '':
-            cmd += '--task-args-file test_config/rally/task_arguments.yaml; '
-            break
-          default:
-            cmd += "--task-args-file ${tasks_args_file}; "
-          break
+      }
+    } else if (platform == 'k8s') {
+      rally_extra_args = "--debug --log-file ${dest_folder}/task.log"
+      env_vars = ( ['tempest_version=15.0.0','KUBE_CONF=local']).join(' -e ')
+      def plugins_repo = ext_variables.plugins_repo
+      def plugins_branch = ext_variables.plugins_branch
+      def kubespec = 'existing@kubernetes:\n  config_file: ' +
+                     "${dest_folder}/kube.config\n"
+      def kube_config = salt.getReturnValues(salt.runSaltProcessStep(master,
+                        'I@kubernetes:master and *01*', 'cmd.run',
+                        ["cat /etc/kubernetes/admin-kube-config"]))
+      def tmp_dir = '/tmp/kube'
+      salt.runSaltProcessStep(master, target, 'file.mkdir', ["${tmp_dir}", "mode=777"])
+      writeFile file: "${tmp_dir}/kubespec.yaml", text: kubespec
+      writeFile file: "${tmp_dir}/kube.config", text: kube_config
+      salt.cmdRun(master, target, "mv ${tmp_dir}/* ${results}/")
+      salt.runSaltProcessStep(master, target, 'file.rmdir', ["${tmp_dir}"])
+      cmd_rally_init = 'set -e ; set -x; if [ ! -w ~/.rally ]; then sudo chown rally:rally ~/.rally ; fi; cd /tmp/; ' +
+          "git clone -b ${plugins_branch ?: 'master'} ${plugins_repo} plugins; " +
+          "sudo pip install --upgrade ./plugins; " +
+          "rally env create --name k8s --spec ${dest_folder}/kubespec.yaml; " +
+          "rally env check k8s; "
+      if (repository == '' ) {
+        cmd_rally_start = "rally $rally_extra_args task start " +
+            "./plugins/samples/scenarios/kubernetes/run-namespaced-pod.yaml; "
+        cmd_rally_checkout = ''
+      } else {
+        cmd_rally_checkout = "git clone -b ${branch ?: 'master'} ${repository} test_config; "
+        if (scenarios == '') {
+          cmd_rally_start = "rally $rally_extra_args task start test_config/rally-k8s/run-namespaced-pod.yaml "
+        } else {
+          cmd_rally_start = "rally $rally_extra_args task start scenarios.yaml "
+          cmd_rally_checkout += "if [ -f ${scenarios} ]; then cp ${scenarios} scenarios.yaml; " +
+              "else " +
+              "find -L ${scenarios} -name '*.yaml' -exec cat {} >> scenarios.yaml \\; ; " +
+              "sed -i '/---/d' scenarios.yaml; fi; "
         }
+      }
+    } else {
+      throw new Exception("Platform ${platform} is not supported yet")
     }
-    cmd += "rally task export --type junit-xml --to ${dest_folder}/report-rally.xml; " +
-        "rally task report --out ${dest_folder}/report-rally.html"
-    full_cmd = cmd0 + cmd
+    if (repository != '' ) {
+      switch(tasks_args_file) {
+        case 'none':
+          cmd_rally_task_args = '; '
+          break
+        case '':
+          cmd_rally_task_args = '--task-args-file test_config/job-params-light.yaml; '
+          break
+        default:
+          cmd_rally_task_args = "--task-args-file ${tasks_args_file}; "
+        break
+      }
+    }
+    full_cmd = cmd_rally_init + cmd_rally_checkout + cmd_rally_start + cmd_rally_task_args + cmd_report
+    salt.runSaltProcessStep(master, target, 'file.touch', ["${results}/rally.db"])
+    salt.cmdRun(master, target, "chmod 666 ${results}/rally.db")
     salt.cmdRun(master, target, "docker run -i --rm --net=host -e ${env_vars} " +
         "-v ${results}:${dest_folder} " +
+        "-v ${results}/rally.db:/home/rally/.rally/rally.db " +
         "--entrypoint /bin/bash ${dockerImageLink} " +
         "-c \"${full_cmd}\" > ${results}/${output_file}")
     addFiles(master, target, results, output_dir)
@@ -284,12 +369,12 @@ def runRallyTests(master, target, dockerImageLink, output_dir, repository, branc
  * @param target            Host to run script from
  * @param dockerImageLink   Docker image link
  * @param output_dir        Directory for results
+ * @param results           The reports directory
  */
-def generateTestReport(master, target, dockerImageLink, output_dir) {
+def generateTestReport(master, target, dockerImageLink, output_dir, results = '/root/qa_results') {
     def report_file = 'jenkins_test_report.html'
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
-    def results = '/root/qa_results'
     def dest_folder = '/opt/devops-qa-tools/generate_test_report/test_results'
     salt.runSaltProcessStep(master, target, 'file.remove', ["${results}"])
     salt.runSaltProcessStep(master, target, 'file.mkdir', ["${results}", "mode=777"])
@@ -331,10 +416,10 @@ def generateTestReport(master, target, dockerImageLink, output_dir) {
  * @param dockerImageLink   Docker image link
  * @param output_dir        Directory for results
  * @param ext_variables     The list of external variables
+ * @param results           The reports directory
  */
-def runSptTests(master, target, dockerImageLink, output_dir, ext_variables = []) {
+def runSptTests(master, target, dockerImageLink, output_dir, ext_variables = [], results = '/root/qa_results') {
     def salt = new com.mirantis.mk.Salt()
-    def results = '/root/qa_results'
     def dest_folder = '/home/rally/qa_results'
     salt.runSaltProcessStep(master, target, 'file.remove', ["${results}"])
     salt.runSaltProcessStep(master, target, 'file.mkdir', ["${results}", "mode=777"])
@@ -548,7 +633,7 @@ def get_vip_node(master, target) {
  *
  * @param target          Host with cvp container
  */
-def openstack_cleanup(master, target, script_path="/home/rally/cvp-configuration/clean.sh") {
+def openstack_cleanup(master, target, script_path="/home/rally/cvp-configuration/cleanup.sh") {
     def salt = new com.mirantis.mk.Salt()
     salt.runSaltProcessStep(master, "${target}", 'cmd.run', ["docker exec cvp bash -c ${script_path}"])
 }
