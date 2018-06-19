@@ -335,7 +335,7 @@ def installOpenstackControl(master, extra_tgt = null) {
     }
 
     // Install neutron service
-    if (salt.testTarget(master, "I@neutron:server ${extra_tgt}") {
+    if (salt.testTarget(master, "I@neutron:server ${extra_tgt}")) {
         // run on first node first
         salt.enforceState(master, "I@neutron:server and *01* ${extra_tgt}", 'neutron.server')
         salt.enforceState(master, "I@neutron:server ${extra_tgt}", 'neutron.server')
