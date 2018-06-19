@@ -4,7 +4,7 @@ package com.mirantis.mk
  *
 */
 
-def validateFoundationInfra(master, extra_tgt = null) {
+def validateFoundationInfra(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
 
     salt.cmdRun(master, "I@salt:master ${extra_tgt}" ,'salt-key')
@@ -14,7 +14,7 @@ def validateFoundationInfra(master, extra_tgt = null) {
     salt.runSaltProcessStep(master, "I@salt:minion ${extra_tgt}", 'state.show_top')
 }
 
-def installFoundationInfra(master, staticMgmtNet=false, extra_tgt = null) {
+def installFoundationInfra(master, staticMgmtNet=false, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
 
@@ -64,7 +64,7 @@ def installFoundationInfra(master, staticMgmtNet=false, extra_tgt = null) {
     }
 }
 
-def installFoundationInfraOnTarget(master, target, staticMgmtNet=false, extra_tgt = null) {
+def installFoundationInfraOnTarget(master, target, staticMgmtNet=false, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
 
@@ -95,7 +95,7 @@ def installFoundationInfraOnTarget(master, target, staticMgmtNet=false, extra_tg
     salt.enforceState(master, target, ['linux.network.host'])
 }
 
-def installInfraKvm(master, extra_tgt = null) {
+def installInfraKvm(master, extra_tgt = '') {
     def common = new com.mirantis.mk.Common()
     def salt = new com.mirantis.mk.Salt()
     def infra_compound = "I@salt:control ${extra_tgt}"
@@ -154,7 +154,7 @@ def installInfraKvm(master, extra_tgt = null) {
 
 }
 
-def installInfra(master, extra_tgt = null) {
+def installInfra(master, extra_tgt = '') {
     def common = new com.mirantis.mk.Common()
     def salt = new com.mirantis.mk.Salt()
 
@@ -241,14 +241,14 @@ def installInfra(master, extra_tgt = null) {
     installBackup(master, 'common', extra_tgt)
 }
 
-def installOpenstackInfra(master, extra_tgt = null) {
+def installOpenstackInfra(master, extra_tgt = '') {
     def common = new com.mirantis.mk.Common()
     common.warningMsg("You calling orchestrate.installOpenstackInfra(). This function is deprecated please use orchestrate.installInfra() directly")
     installInfra(master, extra_tgt)
 }
 
 
-def installOpenstackControl(master, extra_tgt = null) {
+def installOpenstackControl(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
 
@@ -444,7 +444,7 @@ def installOpenstackControl(master, extra_tgt = null) {
 }
 
 
-def installIronicConductor(masteri, extra_tgt = null){
+def installIronicConductor(masteri, extra_tgt = ''){
     def salt = new com.mirantis.mk.Salt()
 
     if (salt.testTarget(master, "I@ironic:conductor ${extra_tgt}")) {
@@ -467,7 +467,7 @@ def installIronicConductor(masteri, extra_tgt = null){
     }
 }
 
-def installManilaShare(master, extra_tgt = null){
+def installManilaShare(master, extra_tgt = ''){
     def salt = new com.mirantis.mk.Salt()
 
     if (salt.testTarget(master, "I@manila:share ${extra_tgt}")) {
@@ -483,7 +483,7 @@ def installManilaShare(master, extra_tgt = null){
 }
 
 
-def installOpenstackNetwork(master, physical = "false", extra_tgt = null) {
+def installOpenstackNetwork(master, physical = "false", extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     //run full neutron state on neutron.gateway - this will install
     //neutron agents in addition to neutron server. Once neutron agents
@@ -512,7 +512,7 @@ def installOpenstackNetwork(master, physical = "false", extra_tgt = null) {
 }
 
 
-def installOpenstackCompute(master, extra_tgt = null) {
+def installOpenstackCompute(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     // Configure compute nodes
     def compute_compound = "I@nova:compute ${extra_tgt}"
@@ -560,7 +560,7 @@ def installOpenstackCompute(master, extra_tgt = null) {
 }
 
 
-def installContrailNetwork(master, extra_tgt = null) {
+def installContrailNetwork(master, extra_tgt = '') {
     def common = new com.mirantis.mk.Common()
     def salt = new com.mirantis.mk.Salt()
 
@@ -582,7 +582,7 @@ def installContrailNetwork(master, extra_tgt = null) {
 }
 
 
-def installContrailCompute(master, extra_tgt = null) {
+def installContrailCompute(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
     // Configure compute nodes
@@ -607,14 +607,14 @@ def installContrailCompute(master, extra_tgt = null) {
 }
 
 
-def installKubernetesInfra(master, extra_tgt = null) {
+def installKubernetesInfra(master, extra_tgt = '') {
     def common = new com.mirantis.mk.Common()
     common.warningMsg("You calling orchestrate.installKubernetesInfra(). This function is deprecated please use orchestrate.installInfra() directly")
     installInfra(master, extra_tgt)
 }
 
 
-def installKubernetesControl(master, extra_tgt = null) {
+def installKubernetesControl(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
 
     // Install Kubernetes pool and Calico
@@ -640,7 +640,7 @@ def installKubernetesControl(master, extra_tgt = null) {
 }
 
 
-def installKubernetesCompute(master, extra_tgt = null) {
+def installKubernetesCompute(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     salt.fullRefresh(master, "*")
 
@@ -665,7 +665,7 @@ def installKubernetesCompute(master, extra_tgt = null) {
 }
 
 
-def installDockerSwarm(master, extra_tgt = null) {
+def installDockerSwarm(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
 
     //Install and Configure Docker
@@ -682,7 +682,7 @@ def installDockerSwarm(master, extra_tgt = null) {
 }
 
 
-def installCicd(master, extra_tgt = null) {
+def installCicd(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
     def gerrit_compound = "I@gerrit:client and ci* ${extra_tgt}"
@@ -773,7 +773,7 @@ def installCicd(master, extra_tgt = null) {
 }
 
 
-def installStacklight(masteri, extra_tgt = null) {
+def installStacklight(masteri, extra_tgt = '') {
     def common = new com.mirantis.mk.Common()
     def salt = new com.mirantis.mk.Salt()
     def retries_wait = 20
@@ -920,7 +920,7 @@ def installStacklight(masteri, extra_tgt = null) {
     salt.enforceState(master, "I@grafana:client ${extra_tgt}", 'grafana.client')
 }
 
-def installStacklightv1Control(master, extra_tgt = null) {
+def installStacklightv1Control(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
 
     // infra install
@@ -961,7 +961,7 @@ def installStacklightv1Control(master, extra_tgt = null) {
     sleep(10)
 }
 
-def installStacklightv1Client(master, extra_tgt = null) {
+def installStacklightv1Client(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
 
@@ -1037,7 +1037,7 @@ def installStacklightv1Client(master, extra_tgt = null) {
 // backups
 //
 
-def installBackup(master, component='common', extra_tgt = null) {
+def installBackup(master, component='common', extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
     if (component == 'common') {
         // Install Backupninja
@@ -1108,7 +1108,7 @@ def installBackup(master, component='common', extra_tgt = null) {
 // Ceph
 //
 
-def installCephMon(master, target="I@ceph:mon", extra_tgt = null) {
+def installCephMon(master, target="I@ceph:mon", extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
 
     salt.enforceState(master, "I@ceph:common ${extra_tgt}", 'salt.minion.grains')
@@ -1127,7 +1127,7 @@ def installCephMon(master, target="I@ceph:mon", extra_tgt = null) {
     }
 }
 
-def installCephOsd(master, target="I@ceph:osd", setup=true, extra_tgt = null) {
+def installCephOsd(master, target="I@ceph:osd", setup=true, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
 
     // install Ceph OSDs
@@ -1145,7 +1145,7 @@ def installCephOsd(master, target="I@ceph:osd", setup=true, extra_tgt = null) {
     }
 }
 
-def installCephClient(master, extra_tgt = null) {
+def installCephClient(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
 
     // install Ceph Radosgw
@@ -1159,7 +1159,7 @@ def installCephClient(master, extra_tgt = null) {
     }
 }
 
-def connectCeph(master, extra_tgt = null) {
+def connectCeph(master, extra_tgt = '') {
     def salt = new com.mirantis.mk.Salt()
 
     // connect Ceph to the env
@@ -1179,7 +1179,7 @@ def connectCeph(master, extra_tgt = null) {
     }
 }
 
-def installOssInfra(master, extra_tgt = null) {
+def installOssInfra(master, extra_tgt = '') {
   def common = new com.mirantis.mk.Common()
   def salt = new com.mirantis.mk.Salt()
 
@@ -1195,7 +1195,7 @@ def installOssInfra(master, extra_tgt = null) {
   }
 }
 
-def installOss(master, extra_tgt = null) {
+def installOss(master, extra_tgt = '') {
   def common = new com.mirantis.mk.Common()
   def salt = new com.mirantis.mk.Salt()
 
