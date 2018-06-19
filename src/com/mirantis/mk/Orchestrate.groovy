@@ -294,9 +294,9 @@ def installOpenstackControl(master, extra_tgt = null) {
     }
 
     // Check glance service
-    if (salt.testTarget(master, "I@glance:server ${extra_tgt}")){
+    if (salt.testTarget(master, "I@glance:server ${extra_tgt}")) {
         common.retry(3,5){
-            salt.cmdRun(master, "I@keystone:server ${extra_tgt}",'. /root/keystonercv3; glance image-list')
+            salt.cmdRun(master, "I@keystone:server ${extra_tgt}", '. /root/keystonercv3; glance image-list')
         }
     }
 
@@ -341,7 +341,7 @@ def installOpenstackControl(master, extra_tgt = null) {
         salt.enforceState(master, "I@neutron:server ${extra_tgt}", 'neutron.server')
         if (salt.testTarget(master, "I@keystone:server ${extra_tgt}")) {
             common.retry(3,5){
-                salt.cmdRun(master, "I@keystone:server ${extra_tgt}", '. /root/keystonercv3; neutron agent-list')
+                salt.cmdRun(master, "I@keystone:server ${extra_tgt}",'. /root/keystonercv3; neutron agent-list')
             }
         }
     }
@@ -596,7 +596,7 @@ def installContrailCompute(master, extra_tgt = null) {
     }
 
     if (salt.testTarget(master, "I@nova:compute ${extra_tgt}")) {
-        salt.cmdRun(master, "I@nova:compute ${extra_tgt}", 'exec 0>&-; exec 1>&-; exec 2>&-; nohup bash -c "ip link | grep vhost && echo no_reboot || sleep 5 && reboot & "", false)
+        salt.cmdRun(master, "I@nova:compute ${extra_tgt}", 'exec 0>&-; exec 1>&-; exec 2>&-; nohup bash -c "ip link | grep vhost && echo no_reboot || sleep 5 && reboot & "', false)
     }
 
     sleep(300)
