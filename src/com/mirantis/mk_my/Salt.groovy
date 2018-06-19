@@ -56,10 +56,15 @@ def saltLogin(master) {
  * @param read_timeout http session read timeout
  */
 @NonCPS
-def runSaltCommand(saltId, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1) {
+def runSaltCommand(saltId, client, target, function, batch = null, args = null, kwargs = null, timeout = -1, read_timeout = -1, extra_tgt = null) {
+
+    if (extra_tgt) {
+        data = ['tgt': target.expression + " and ${extra_tgt}"]
+    } else {
+        data = ['tgt': target.expression]
+    }
 
     data = [
-        'tgt': target.expression,
         'fun': function,
         'client': client,
         'expr_form': target.type,
@@ -105,11 +110,11 @@ def runSaltCommand(saltId, client, target, function, batch = null, args = null, 
  * @param pillar pillar name (optional)
  * @return output of salt command
  */
-def getPillar(saltId, target, pillar = null) {
+def getPillar(saltId, target, pillar = null, extra_tgt = null) {
     if (pillar != null) {
-        return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'pillar.get', null, [pillar.replace('.', ':')])
+        return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'pillar.get', null, [pillar.replace('.', ':')], null, -1, -1, extra_tgt)
     } else {
-        return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'pillar.data')
+        return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'pillar.data', null, null, null, -1, -1, extra_tgt)
     }
 }
 
@@ -120,11 +125,11 @@ def getPillar(saltId, target, pillar = null) {
  * @param grain grain name (optional)
  * @return output of salt command
  */
-def getGrain(saltId, target, grain = null) {
+def getGrain(saltId, target, grain = null, extra_tgt = null) {
     if(grain != null) {
-        return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'grains.item', null, [grain])
+        return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'grains.item', null, [grain], null, -1, -1, extra_tgt)
     } else {
-        return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'grains.items')
+        return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'grains.items', null, null, null, -1, -1, extra_tgt)
     }
 }
 
@@ -165,7 +170,7 @@ def enforceStateWithExclude(saltId, target, state, excludedStates = "", output =
  * @param minionRestartWaitTimeout specifies timeout that we should wait after minion restart.
  * @return output of salt command
  */
-def enforceState(saltId, target, state, output = true, failOnError = true, batch = null, optional = false, read_timeout=-1, retries=-1, queue=true, saltArgs = [], minionRestartWaitTimeout=10) {
+def enforceState(saltId, target, state, output = true, failOnError = true, batch = null, optional = false, read_timeout=-1, retries=-1, queue=true, saltArgs = [], minionRestartWaitTimeout=10, extra_tgt = null) {
     def common = new com.mirantis.mk.Common()
     // add state to salt args
     if (state instanceof String) {
@@ -182,19 +187,20 @@ def enforceState(saltId, target, state, output = true, failOnError = true, batch
       kwargs["queue"] = true
     }
 
+
     if (optional == false || testTarget(saltId, target)){
         if (retries > 0){
             def retriesCounter = 0
             retry(retries){
                 retriesCounter++
                 // we have to reverse order in saltArgs because salt state have to be first
-                out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, saltArgs.reverse(), kwargs, -1, read_timeout)
+                out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, saltArgs.reverse(), kwargs, -1, read_timeout, extra_tgt)
                 // failOnError should be passed as true because we need to throw exception for retry block handler
                 checkResult(out, true, output, true, retriesCounter < retries) //disable ask on error for every interation except last one
             }
         } else {
             // we have to reverse order in saltArgs because salt state have to be first
-            out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, saltArgs.reverse(), kwargs, -1, read_timeout)
+            out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'state.sls', batch, saltArgs.reverse(), kwargs, -1, read_timeout, extra_tgt)
             checkResult(out, failOnError, output)
         }
         waitForMinion(out, minionRestartWaitTimeout)
@@ -215,7 +221,7 @@ def enforceState(saltId, target, state, output = true, failOnError = true, batch
  * @param saltArgs additional salt args eq. ["runas=aptly"]
  * @return output of salt command
  */
-def cmdRun(saltId, target, cmd, checkResponse = true, batch=null, output = true, saltArgs = []) {
+def cmdRun(saltId, target, cmd, checkResponse = true, batch=null, output = true, saltArgs = [], extra_tgt = null) {
     def common = new com.mirantis.mk.Common()
     def originalCmd = cmd
     common.infoMsg("Running command ${cmd} on ${target}")
@@ -226,7 +232,7 @@ def cmdRun(saltId, target, cmd, checkResponse = true, batch=null, output = true,
     // add cmd name to salt args list
     saltArgs << cmd
 
-    def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.run', batch, saltArgs.reverse())
+    def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.run', batch, saltArgs.reverse(), null, -1, -1, extra_tgt)
     if (checkResponse) {
         // iterate over all affected nodes and check success return code
         if (out["return"]){
@@ -262,16 +268,17 @@ def cmdRun(saltId, target, cmd, checkResponse = true, batch=null, output = true,
  * @param answers how many minions should return (optional, default 1)
  * @return output of salt command
  */
-def minionPresent(saltId, target, minion_name, waitUntilPresent = true, batch=null, output = true, maxRetries = 180, answers = 1) {
+def minionPresent(saltId, target, minion_name, waitUntilPresent = true, batch=null, output = true, maxRetries = 180, answers = 1, extra_tgt = null) {
     minion_name = minion_name.replace("*", "")
     def common = new com.mirantis.mk.Common()
     common.infoMsg("Looking for minion: " + minion_name)
     def cmd = 'salt-key | grep ' + minion_name
+
     if (waitUntilPresent){
         def count = 0
         while(count < maxRetries) {
             try {
-                def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.shell', batch, [cmd], null, 5)
+                def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.shell', batch, [cmd], null, 5, extra_tgt)
                 if (output) {
                     printSaltCommandResult(out)
                 }
@@ -291,7 +298,7 @@ def minionPresent(saltId, target, minion_name, waitUntilPresent = true, batch=nu
         }
     } else {
         try {
-            def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.shell', batch, [cmd], null, 5)
+            def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.shell', batch, [cmd], null, 5, extra_tgt)
             if (output) {
                 printSaltCommandResult(out)
             }
@@ -318,11 +325,12 @@ def minionPresent(saltId, target, minion_name, waitUntilPresent = true, batch=nu
  * @param answers how many minions should return (optional, default 1)
  * @return output of salt command
  */
-def minionsPresent(saltId, target = 'I@salt:master', target_minions = '', waitUntilPresent = true, batch=null, output = true, maxRetries = 200, answers = 1) {
+def minionsPresent(saltId, target = 'I@salt:master', target_minions = '', waitUntilPresent = true, batch=null, output = true, maxRetries = 200, answers = 1, extra_tgt = null) {
     def target_hosts = getMinionsSorted(saltId, target_minions)
+
     for (t in target_hosts) {
         def tgt = stripDomainName(t)
-        minionPresent(saltId, target, tgt, waitUntilPresent, batch, output, maxRetries, answers)
+        minionPresent(saltId, target, tgt, waitUntilPresent, batch, output, maxRetries, answers, extra_tgt)
     }
 }
 
@@ -339,11 +347,12 @@ def minionsPresent(saltId, target = 'I@salt:master', target_minions = '', waitUn
  * @param answers how many minions should return (optional, default 1)
  * @return output of salt command
  */
-def minionsPresentFromList(saltId, target = 'I@salt:master', target_minions = [], waitUntilPresent = true, batch=null, output = true, maxRetries = 200, answers = 1) {
+def minionsPresentFromList(saltId, target = 'I@salt:master', target_minions = [], waitUntilPresent = true, batch=null, output = true, maxRetries = 200, answers = 1, extra_tgt = null) {
     def common = new com.mirantis.mk.Common()
+ 
     for (tgt in target_minions) {
         common.infoMsg("Checking if minion " + tgt + " is present")
-        minionPresent(saltId, target, tgt, waitUntilPresent, batch, output, maxRetries, answers)
+        minionPresent(saltId, target, tgt, waitUntilPresent, batch, output, maxRetries, answers, extra_tgt)
     }
 }
 
@@ -357,15 +366,16 @@ def minionsPresentFromList(saltId, target = 'I@salt:master', target_minions = []
  * @param maxRetries finite number of iterations to check status of a command (default 200)
  * @return output of salt command
  */
-def minionsReachable(saltId, target, target_nodes, batch=null, wait = 10, maxRetries = 200) {
+def minionsReachable(saltId, target, target_nodes, batch=null, wait = 10, maxRetries = 200, extra_tgt = null) {
     def common = new com.mirantis.mk.Common()
     def cmd = "salt -t${wait} -C '${target_nodes}' test.ping"
     common.infoMsg("Checking if all ${target_nodes} minions are reachable")
     def count = 0
+
     while(count < maxRetries) {
         Calendar timeout = Calendar.getInstance();
         timeout.add(Calendar.SECOND, wait);
-        def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.shell', batch, [cmd], null, wait)
+        def out = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'cmd.shell', batch, [cmd], null, wait, extra_tgt)
         Calendar current = Calendar.getInstance();
         if (current.getTime().before(timeout.getTime())) {
            printSaltCommandResult(out)
@@ -476,10 +486,10 @@ def syncAll(saltId, target) {
  * @param target Get pillar target
  * @return output of salt command
  */
-def fullRefresh(saltId, target){
-    runSaltProcessStep(saltId, target, 'saltutil.refresh_pillar', [], null, true)
-    runSaltProcessStep(saltId, target, 'saltutil.refresh_grains', [], null, true)
-    runSaltProcessStep(saltId, target, 'saltutil.sync_all', [], null, true)
+def fullRefresh(saltId, target, extra_tgt = null){
+    runSaltProcessStep(saltId, target, 'saltutil.refresh_pillar', [], null, true, -1, null, extra_tgt)
+    runSaltProcessStep(saltId, target, 'saltutil.refresh_grains', [], null, true, -1, null, extra_tgt)
+    runSaltProcessStep(saltId, target, 'saltutil.sync_all', [], null, true, -1, null, extra_tgt)
 }
 
 /**
@@ -522,8 +532,9 @@ def enforceHighstate(saltId, target, output = false, failOnError = true, batch =
  * @param target Get minions target
  * @return list of active minions fitin
  */
-def getMinions(saltId, target) {
-    def minionsRaw = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'test.ping')
+def getMinions(saltId, target, extra_tgt = null) {
+
+    def minionsRaw = runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'test.ping', null, null, null, -1, -1, extra_tgt)
     return new ArrayList<String>(minionsRaw['return'][0].keySet())
 }
 
@@ -533,8 +544,8 @@ def getMinions(saltId, target) {
  * @param target Get minions target
  * @return list of sorted active minions fitin
  */
-def getMinionsSorted(saltId, target) {
-    return getMinions(saltId, target).sort()
+def getMinionsSorted(saltId, target, extra_tgt = null) {
+    return getMinions(saltId, target, extra_tgt).sort()
 }
 
 /**
@@ -629,8 +640,8 @@ def getNodeProvider(saltId, nodeName) {
  * @return bool indicating if target was succesful
  */
 
-def testTarget(saltId, target) {
-    return getMinions(saltId, target).size() > 0
+def testTarget(saltId, target, extra_tgt = null) {
+    return getMinions(saltId, target, extra_tgt).size() > 0
 }
 
 /**
@@ -680,7 +691,7 @@ def orchestrateSystem(saltId, target, orchestrate) {
  * @param timeout  Additional argument salt api timeout
  * @return output of salt command
  */
-def runSaltProcessStep(saltId, tgt, fun, arg = [], batch = null, output = true, timeout = -1, kwargs = null) {
+def runSaltProcessStep(saltId, tgt, fun, arg = [], batch = null, output = true, timeout = -1, kwargs = null, extra_tgt = null) {
     def common = new com.mirantis.mk.Common()
     def salt = new com.mirantis.mk.Salt()
     def out
@@ -688,9 +699,9 @@ def runSaltProcessStep(saltId, tgt, fun, arg = [], batch = null, output = true, 
     common.infoMsg("Running step ${fun} ${arg} on ${tgt}")
 
     if (batch == true) {
-        out = runSaltCommand(saltId, 'local_batch', ['expression': tgt, 'type': 'compound'], fun, String.valueOf(batch), arg, kwargs, timeout)
+        out = runSaltCommand(saltId, 'local_batch', ['expression': tgt, 'type': 'compound'], fun, String.valueOf(batch), arg, kwargs, timeout, extra_tgt)
     } else {
-        out = runSaltCommand(saltId, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, kwargs, timeout)
+        out = runSaltCommand(saltId, 'local', ['expression': tgt, 'type': 'compound'], fun, batch, arg, kwargs, timeout, extra_tgt)
     }
 
     if (output == true) {
@@ -905,7 +916,7 @@ def getFileContent(saltId, target, file) {
  * @param reclass_dir    Directory where Reclass git repo is located
  */
 
-def setSaltOverrides(saltId, salt_overrides, reclass_dir="/srv/salt/reclass", extra_tgt = null) {
+def setSaltOverrides(saltId, salt_overrides, reclass_dir="/srv/salt/reclass", extra_target='') {
     def common = new com.mirantis.mk.Common()
     def salt_overrides_map = readYaml text: salt_overrides
     for (entry in common.entries(salt_overrides_map)) {
@@ -913,9 +924,9 @@ def setSaltOverrides(saltId, salt_overrides, reclass_dir="/srv/salt/reclass", ex
          def value = entry[1]
 
          common.debugMsg("Set salt override ${key}=${value}")
-         runSaltProcessStep(saltId, "I@salt:master ${extra_tgt}", 'reclass.cluster_meta_set', [key, value], false)
+         runSaltProcessStep(saltId, 'I@salt:master ${extra_target}', 'reclass.cluster_meta_set', [key, value], false)
     }
-    runSaltProcessStep(saltId, "I@salt:master ${extra_tgt}", 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
+    runSaltProcessStep(saltId, 'I@salt:master ${extra_target}', 'cmd.run', ["git -C ${reclass_dir} update-index --skip-worktree classes/cluster/overrides.yml"])
 }
 
 /**
