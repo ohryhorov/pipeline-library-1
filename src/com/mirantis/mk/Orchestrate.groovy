@@ -27,6 +27,10 @@ def installFoundationInfra(master, staticMgmtNet=false, extra_tgt = '') {
     salt.enforceState(master, "I@salt:master ${extra_tgt}", ['salt.master'], true, false, null, false, 120, 2)
     salt.fullRefresh(master, "*")
 
+    if (salt.testTarget(master, "I@salt:syndic:enabled:True ${extra_tgt}")) {
+        salt.enforceState(master, "I@salt:syndic:enabled:True ${extra_tgt}", 'salt.syndic')
+    }
+
     salt.enforceState(master, "I@salt:master ${extra_tgt}", ['salt.minion'], true, false, null, false, 60, 2)
     salt.enforceState(master, "I@salt:master ${extra_tgt}", ['salt.minion'])
     salt.fullRefresh(master, "*")
