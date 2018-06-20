@@ -905,7 +905,7 @@ def getFileContent(saltId, target, file) {
  * @param reclass_dir    Directory where Reclass git repo is located
  */
 
-def setSaltOverrides(saltId, salt_overrides, reclass_dir="/srv/salt/reclass", extra_tgt = null) {
+def setSaltOverrides(saltId, salt_overrides, reclass_dir="/srv/salt/reclass", extra_tgt = '') {
     def common = new com.mirantis.mk.Common()
     def salt_overrides_map = readYaml text: salt_overrides
     for (entry in common.entries(salt_overrides_map)) {
