@@ -32,34 +32,46 @@ def getBinaryBuildProperties(ArrayList customProperties) {
 }
 
 /**
- * Get URL to artifact by properties
- * Returns String with URL to found artifact or null if nothing
+ * Get URL to artifact(s) by properties
+ * Returns String(s) with URL to found artifact or null if nothing
  *
  * @param artifactoryURL String, an URL to Artifactory
  * @param properties LinkedHashMap, a Hash of properties (key-value) which
  *        which should determine artifact in Artifactory
+ * @param onlyLastItem Boolean, return only last URL if true(by default),
+ *        else return list of all found artifact URLS
+ *
  */
-def uriByProperties(String artifactoryURL, LinkedHashMap properties) {
+def uriByProperties(String artifactoryURL, LinkedHashMap properties, Boolean onlyLastItem=true) {
     def key, value
     def properties_str = ''
     for (int i = 0; i < properties.size(); i++) {
         // avoid serialization errors
-        key = properties.entrySet().toArray()[i].key
-        value = properties.entrySet().toArray()[i].value
-        properties_str += "${key}=${value}&"
+        key = properties.entrySet().toArray()[i].key.trim()
+        value = properties.entrySet().toArray()[i].value.trim()
+        properties_str += /${key}=${value}&/
     }
     def search_url = "${artifactoryURL}/api/search/prop?${properties_str}"
 
-    def result = sh(script: "bash -c \"curl -X GET \'${search_url}\'\"",
+    def result = sh(script: /curl -X GET '${search_url}'/,
             returnStdout: true).trim()
     def content = new groovy.json.JsonSlurperClassic().parseText(result)
     def uri = content.get("results")
     if (uri) {
-        return uri.last().get("uri")
+        if (onlyLastItem) {
+            return uri.last().get("uri")
+        } else {
+            res = []
+            uri.each {it ->
+                res.add(it.get("uri"))
+            }
+            return res
+        }
     } else {
         return null
     }
 }
+
 
 /**
  * Set properties for artifact in Artifactory repo
@@ -268,7 +280,7 @@ def promoteDockerArtifact(String artifactoryURL, String artifactoryDevRepo,
              passwordVariable: 'ARTIFACTORY_PASSWORD',
              usernameVariable: 'ARTIFACTORY_LOGIN']
     ]) {
-        sh "bash -c \"curl  -u ${ARTIFACTORY_LOGIN}:${ARTIFACTORY_PASSWORD} -H \"Content-Type:application/json\" -X POST -d @${queryFile} ${url}\""
+        sh "bash -c \"curl --fail -u ${ARTIFACTORY_LOGIN}:${ARTIFACTORY_PASSWORD} -H \"Content-Type:application/json\" -X POST -d @${queryFile} ${url}\""
     }
     sh "rm -v ${queryFile}"
 }

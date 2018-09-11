@@ -64,9 +64,13 @@ def runSaltCommand(saltId, client, target, function, batch = null, args = null, 
         'client': client,
         'expr_form': target.type,
     ]
-    if(batch != null && ( (batch instanceof Integer && batch > 0) || (batch instanceof String && batch.contains("%")))){
-        data['client']= "local_batch"
-        data['batch'] = batch
+
+    if(batch != null){
+        batch = batch.toString()
+        if( (batch.isInteger() && batch.toInteger() > 0) || (batch.contains("%"))){
+            data['client']= "local_batch"
+            data['batch'] = batch
+        }
     }
 
     if (args) {
@@ -128,6 +132,16 @@ def getGrain(saltId, target, grain = null) {
     }
 }
 
+/**
+ * Return config items for given saltId and target
+ * @param saltId Salt Connection object or pepperEnv (the command will be sent using the selected method)
+ * @param target Get grain target
+ * @param config grain name (optional)
+ * @return output of salt command
+ */
+def getConfig(saltId, target, config) {
+    return runSaltCommand(saltId, 'local', ['expression': target, 'type': 'compound'], 'config.get', null, [config.replace('.', ':')], '--out=json')
+}
 
 /**
  * Enforces state on given saltId and target
@@ -148,6 +162,38 @@ def getGrain(saltId, target, grain = null) {
 def enforceStateWithExclude(saltId, target, state, excludedStates = "", output = true, failOnError = true, batch = null, optional = false, read_timeout=-1, retries=-1, queue=true, saltArgs=[]) {
     saltArgs << "exclude=${excludedStates}"
     return enforceState(saltId, target, state, output, failOnError, batch, optional, read_timeout, retries, queue, saltArgs)
+}
+
+/**
+ * Allows to test the given target for reachability and if reachable enforces the state
+* @param saltId Salt Connection object or pepperEnv (the command will be sent using the selected method)
+ * @param target State enforcing target
+ * @param state Salt state
+ * @param testTargetMatcher Salt compound matcher to be tested (default is empty string). If empty string, param `target` will be used for tests
+ * @param output print output (optional, default true)
+ * @param failOnError throw exception on salt state result:false (optional, default true)
+ * @param batch salt batch parameter integer or string with percents (optional, default null - disable batch)
+ * @param optional Optional flag (if true pipeline will continue even if no minions for target found)
+ * @param read_timeout http session read timeout (optional, default -1 - disabled)
+ * @param retries Retry count for salt state. (optional, default -1 - no retries)
+ * @param queue salt queue parameter for state.sls calls (optional, default true) - CANNOT BE USED WITH BATCH
+ * @param saltArgs additional salt args eq. ["runas=aptly"]
+ * @return output of salt command
+ */
+def enforceStateWithTest(saltId, target, state, testTargetMatcher = "", output = true, failOnError = true, batch = null, optional = false, read_timeout=-1, retries=-1, queue=true, saltArgs=[]) {
+    def common = new com.mirantis.mk.Common()
+    if (!testTargetMatcher) {
+        testTargetMatcher = target
+    }
+    if (testTarget(saltId, testTargetMatcher)) {
+        return enforceState(saltId, target, state, output, failOnError, batch, false, read_timeout, retries, queue, saltArgs)
+    } else {
+        if (!optional) {
+                throw new Exception("No Minions matched the target matcher: ${testTargetMatcher}.")
+            } else {
+                common.infoMsg("No Minions matched the target given, but 'optional' param was set to true - Pipeline continues. ")
+            }
+    }
 }
 
 /* Enforces state on given saltId and target
@@ -234,12 +280,20 @@ def cmdRun(saltId, target, cmd, checkResponse = true, batch=null, output = true,
                 def node = out["return"][i];
                 for(int j=0;j<node.size();j++){
                     def nodeKey = node.keySet()[j]
-                    if (!node[nodeKey].contains("Salt command execution success")) {
-                        throw new Exception("Execution of cmd ${originalCmd} failed. Server returns: ${node[nodeKey]}")
+                    if (node[nodeKey] instanceof String) {
+                        if (!node[nodeKey].contains("Salt command execution success")) {
+                            throw new Exception("Execution of cmd ${originalCmd} failed. Server returns: ${node[nodeKey]}")
+                        }
+                    } else if (node[nodeKey] instanceof Boolean) {
+                        if (!node[nodeKey]) {
+                            throw new Exception("Execution of cmd ${originalCmd} failed. Server returns: ${node[nodeKey]}")
+                        }
+                    } else {
+                        throw new Exception("Execution of cmd ${originalCmd} failed. Server returns unexpected data type: ${node[nodeKey]}")
                     }
                 }
             }
-        }else{
+        } else {
             throw new Exception("Salt Api response doesn't have return param!")
         }
     }
@@ -545,7 +599,7 @@ def getMinionsSorted(saltId, target) {
  */
 def getFirstMinion(saltId, target) {
     def minionsSorted = getMinionsSorted(saltId, target)
-    return minionsSorted[0].split("\\.")[0]
+    return minionsSorted[0]
 }
 
 /**
@@ -663,10 +717,65 @@ def generateNodeMetadata(saltId, target, host, classes, parameters) {
  * @param saltId Salt Connection object or pepperEnv (the command will be sent using the selected method)
  * @param target Orchestration target
  * @param orchestrate Salt orchestrate params
+ * @param kwargs Salt orchestrate params
  * @return output of salt command
  */
-def orchestrateSystem(saltId, target, orchestrate) {
-    return runSaltCommand(saltId, 'runner', target, 'state.orchestrate', [orchestrate])
+def orchestrateSystem(saltId, target, orchestrate=[], kwargs = null) {
+    //Since the runSaltCommand uses "arg" (singular) for "runner" client this won`t work correctly on old salt 2016
+    //cause this version of salt used "args" (plural) for "runner" client, see following link for reference:
+    //https://github.com/saltstack/salt/pull/32938
+    def common = new com.mirantis.mk.Common()
+    def result = runSaltCommand(saltId, 'runner', target, 'state.orchestrate', true, orchestrate, kwargs, 7200, 7200)
+        if(result != null){
+            if(result['return']){
+                def retcode = result['return'][0].get('retcode')
+                if (retcode != 0) {
+                    throw new Exception("Orchestration state failed while running: "+orchestrate)
+                }else{
+                    common.infoMsg("Orchestrate state "+orchestrate+" succeeded")
+                }
+            }else{
+                common.errorMsg("Salt result has no return attribute! Result: ${result}")
+            }
+        }else{
+            common.errorMsg("Cannot check salt result, given result is null")
+        }
+}
+
+/**
+ * Run salt pre or post orchestrate tasks
+ *
+ * @param  saltId       Salt Connection object or pepperEnv (the command will be sent using the selected method)
+ * @param  pillar_tree  Reclass pillar that has orchestrate pillar for desired stage
+ * @param  extra_tgt    Extra targets for compound
+ *
+ * @return              output of salt command
+ */
+def orchestratePrePost(saltId, pillar_tree, extra_tgt = '') {
+
+    def common = new com.mirantis.mk.Common()
+    def salt = new com.mirantis.mk.Salt()
+    def compound = 'I@' + pillar_tree + " " + extra_tgt
+
+    common.infoMsg("Refreshing pillars")
+    runSaltProcessStep(saltId, '*', 'saltutil.refresh_pillar', [], null, true)
+
+    common.infoMsg("Looking for orchestrate pillars")
+    if (salt.testTarget(saltId, compound)) {
+        for ( node in salt.getMinionsSorted(saltId, compound) ) {
+            def pillar = salt.getPillar(saltId, node, pillar_tree)
+            if ( !pillar['return'].isEmpty() ) {
+                for ( orch_id in pillar['return'][0].values() ) {
+                    def orchestrator = orch_id.values()['orchestrator']
+                    def orch_enabled = orch_id.values()['enabled']
+                    if ( orch_enabled ) {
+                        common.infoMsg("Orchestrating: ${orchestrator}")
+                        salt.printSaltCommandResult(salt.orchestrateSystem(saltId, ['expression': node], [orchestrator]))
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -733,6 +842,8 @@ def checkResult(result, failOnError = true, printResults = true, printOnlyChange
                             def resKey;
                             if(node instanceof Map){
                                 resKey = node.keySet()[k]
+                                if (resKey == "retcode")
+                                    continue
                             }else if(node instanceof List){
                                 resKey = k
                             }
@@ -903,6 +1014,7 @@ def getFileContent(saltId, target, file) {
  * @param saltId         Salt Connection object or pepperEnv (the command will be sent using the selected method)
  * @param salt_overrides YAML formatted string containing key: value, one per line
  * @param reclass_dir    Directory where Reclass git repo is located
+ * @param extra_tgt      Extra targets for compound
  */
 
 def setSaltOverrides(saltId, salt_overrides, reclass_dir="/srv/salt/reclass", extra_tgt = '') {

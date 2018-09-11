@@ -234,10 +234,41 @@ def runTempestTests(master, target, dockerImageLink, output_dir, confRepository,
     }
     cmd += "rally verify report --type json --to ${dest_folder}/report-tempest.json; " +
         "rally verify report --type html --to ${dest_folder}/report-tempest.html"
-    salt.cmdRun(master, target, "docker run -i --rm --net=host -e ${env_vars} " +
+    salt.cmdRun(master, target, "docker run -w /home/rally -i --rm --net=host -e ${env_vars} " +
         "-v ${results}:${dest_folder} --entrypoint /bin/bash ${dockerImageLink} " +
         "-c \"${cmd}\" > ${results}/${output_file}")
     addFiles(master, target, results, output_dir)
+}
+
+/**
+ * Make all-in-one scenario cmd for rally tests
+ *
+ * @param scenarios_path    Path to scenarios folder/file
+ * @param skip_scenarios    Comma-delimited list of scenarios names to skip
+ * @param bundle_file       Bundle name to create
+*/
+def bundle_up_scenarios(scenarios_path, skip_scenarios, bundle_file) {
+      def skip_names = ''
+      def skip_dirs = ''
+      def result = ''
+      if (skip_scenarios != ''){
+        for ( scen in skip_scenarios.split(',') ) {
+          if ( scen.contains('yaml')) {
+            skip_names += "! -name ${scen} "
+          }
+          else {
+            skip_dirs += "-path ${scenarios_path}/${scen} -prune -o "
+          }
+        }
+      }
+      result = "if [ -f ${scenarios_path} ]; then cp ${scenarios_path} ${bundle_file}; " +
+          "else " +
+          "find -L ${scenarios_path} " + skip_dirs +
+          " -name '*.yaml' " + skip_names +
+          "-exec cat {} >> ${bundle_file} \\; ; " +
+          "sed -i '/---/d' ${bundle_file}; fi; "
+
+      return result
 }
 
 /**
@@ -247,28 +278,34 @@ def runTempestTests(master, target, dockerImageLink, output_dir, confRepository,
  * @param dockerImageLink   Docker image link
  * @param platform          What do we have underneath (openstack/k8s)
  * @param output_dir        Directory for results
- * @param repository        Git repository with files for Rally
- * @param branch            Git branch which will be used during the checkout
+ * @param config_repo       Git repository with with files for Rally
+ * @param config_branch     Git config repo branch which will be used during the checkout
+ * @param plugins_repo      Git repository with Rally plugins
+ * @param plugins_branch    Git plugins repo branch which will be used during the checkout
  * @param scenarios         Directory inside repo with specific scenarios
+ * @param sl_scenarios      Directory inside repo with specific scenarios for stacklight
  * @param tasks_args_file   Argument file that is used for throttling settings
  * @param ext_variables     The list of external variables
  * @param results           The reports directory
  */
-def runRallyTests(master, target, dockerImageLink, platform, output_dir, repository, branch, scenarios = '', tasks_args_file = '', ext_variables = [], results = '/root/qa_results') {
+def runRallyTests(master, target, dockerImageLink, platform, output_dir, config_repo, config_branch, plugins_repo, plugins_branch, scenarios, sl_scenarios = '', tasks_args_file = '', ext_variables = [], results = '/root/qa_results', skip_list = '') {
     def salt = new com.mirantis.mk.Salt()
     def output_file = 'docker-rally.log'
     def dest_folder = '/home/rally/qa_results'
     def env_vars = []
     def rally_extra_args = ''
+    def cmd_rally_plugins =
+          "git clone -b ${plugins_branch ?: 'master'} ${plugins_repo} /tmp/plugins; " +
+          "sudo pip install --upgrade /tmp/plugins; "
     def cmd_rally_init = ''
-    def cmd_rally_checkout = ''
+    def cmd_rally_checkout = "git clone -b ${config_branch ?: 'master'} ${config_repo} test_config; "
     def cmd_rally_start = ''
     def cmd_rally_task_args = ''
-    def cmd_report = "rally task export --type junit-xml --to ${dest_folder}/report-rally.xml; " +
-        "rally task report --out ${dest_folder}/report-rally.html"
+    def cmd_rally_stacklight = ''
+    def cmd_rally_report = ''
     salt.runSaltProcessStep(master, target, 'file.remove', ["${results}"])
     salt.runSaltProcessStep(master, target, 'file.mkdir', ["${results}", "mode=777"])
-    if (platform == 'openstack') {
+    if (platform['type'] == 'openstack') {
       def _pillar = salt.getPillar(master, 'I@keystone:server', 'keystone:server')
       def keystone = _pillar['return'][0].values()[0]
       env_vars = ( ['tempest_version=15.0.0',
@@ -278,68 +315,49 @@ def runRallyTests(master, target, dockerImageLink, platform, output_dir, reposit
           "OS_AUTH_URL=http://${keystone.bind.private_address}:${keystone.bind.private_port}/v2.0",
           "OS_REGION_NAME=${keystone.region}",
           'OS_ENDPOINT_TYPE=admin'] + ext_variables ).join(' -e ')
-      if (repository == '' ) {
-        cmd_rally_init = ''
-        cmd_rally_start = '/opt/devops-qa-tools/deployment/configure.sh; ' +
-            "rally $rally_extra_args task start combined_scenario.yaml " +
-            '--task-args-file /opt/devops-qa-tools/rally-scenarios/task_arguments.yaml; '
-        cmd_rally_checkout = ''
-      } else {
-        cmd_rally_init = 'rally db create; ' +
-            'rally deployment create --fromenv --name=existing; ' +
-            'rally deployment config; '
-        cmd_rally_checkout = "git clone -b ${branch ?: 'master'} ${repository} test_config; "
-        if (scenarios == '') {
-          cmd_rally_start = "rally $rally_extra_args task start test_config/rally/scenario.yaml "
-        } else {
-          cmd_rally_start = "rally $rally_extra_args task start scenarios.yaml "
-          cmd_rally_checkout += "if [ -f ${scenarios} ]; then cp ${scenarios} scenarios.yaml; " +
-              "else " +
-              "find -L ${scenarios} -name '*.yaml' -exec cat {} >> scenarios.yaml \\; ; " +
-              "sed -i '/---/d' scenarios.yaml; fi; "
-        }
+      cmd_rally_init = 'rally db create; ' +
+          'rally deployment create --fromenv --name=existing; ' +
+          'rally deployment config; '
+      if (platform['stacklight_enabled'] == true) {
+        cmd_rally_stacklight = bundle_up_scenarios(sl_scenarios, skip_list, "scenarios_${platform.type}_stacklight.yaml")
+        cmd_rally_stacklight += "rally $rally_extra_args task start scenarios_${platform.type}_stacklight.yaml " +
+            "--task-args-file test_config/job-params-stacklight.yaml; "
       }
-    } else if (platform == 'k8s') {
+    } else if (platform['type'] == 'k8s') {
       rally_extra_args = "--debug --log-file ${dest_folder}/task.log"
-      env_vars = ( ['tempest_version=15.0.0','KUBE_CONF=local']).join(' -e ')
-      def plugins_repo = ext_variables.plugins_repo
-      def plugins_branch = ext_variables.plugins_branch
-      def kubespec = 'existing@kubernetes:\n  config_file: ' +
-                     "${dest_folder}/kube.config\n"
-      def kube_config = salt.getReturnValues(salt.runSaltProcessStep(master,
+      def _pillar = salt.getPillar(master, 'I@kubernetes:master and *01*', 'kubernetes:master')
+      def kubernetes = _pillar['return'][0].values()[0]
+      env_vars = [
+          "KUBERNETES_HOST=${kubernetes.apiserver.vip_address}" +
+          ":${kubernetes.apiserver.insecure_port}",
+          "KUBERNETES_CERT_AUTH=${dest_folder}/k8s-ca.crt",
+          "KUBERNETES_CLIENT_KEY=${dest_folder}/k8s-client.key",
+          "KUBERNETES_CLIENT_CERT=${dest_folder}/k8s-client.crt"].join(' -e ')
+      def k8s_ca = salt.getReturnValues(salt.runSaltProcessStep(master,
                         'I@kubernetes:master and *01*', 'cmd.run',
-                        ["cat /etc/kubernetes/admin-kube-config"]))
+                        ["cat /etc/kubernetes/ssl/ca-kubernetes.crt"]))
+      def k8s_client_key = salt.getReturnValues(salt.runSaltProcessStep(master,
+                        'I@kubernetes:master and *01*', 'cmd.run',
+                        ["cat /etc/kubernetes/ssl/kubelet-client.key"]))
+      def k8s_client_crt = salt.getReturnValues(salt.runSaltProcessStep(master,
+                        'I@kubernetes:master and *01*', 'cmd.run',
+                        ["cat /etc/kubernetes/ssl/kubelet-client.crt"]))
       def tmp_dir = '/tmp/kube'
       salt.runSaltProcessStep(master, target, 'file.mkdir', ["${tmp_dir}", "mode=777"])
-      writeFile file: "${tmp_dir}/kubespec.yaml", text: kubespec
-      writeFile file: "${tmp_dir}/kube.config", text: kube_config
+      writeFile file: "${tmp_dir}/k8s-ca.crt", text: k8s_ca
+      writeFile file: "${tmp_dir}/k8s-client.key", text: k8s_client_key
+      writeFile file: "${tmp_dir}/k8s-client.crt", text: k8s_client_crt
       salt.cmdRun(master, target, "mv ${tmp_dir}/* ${results}/")
       salt.runSaltProcessStep(master, target, 'file.rmdir', ["${tmp_dir}"])
-      cmd_rally_init = 'set -e ; set -x; if [ ! -w ~/.rally ]; then sudo chown rally:rally ~/.rally ; fi; cd /tmp/; ' +
-          "git clone -b ${plugins_branch ?: 'master'} ${plugins_repo} plugins; " +
-          "sudo pip install --upgrade ./plugins; " +
-          "rally env create --name k8s --spec ${dest_folder}/kubespec.yaml; " +
+      cmd_rally_init = "rally db recreate; " +
+          "rally env create --name k8s --from-sysenv; " +
           "rally env check k8s; "
-      if (repository == '' ) {
-        cmd_rally_start = "rally $rally_extra_args task start " +
-            "./plugins/samples/scenarios/kubernetes/run-namespaced-pod.yaml; "
-        cmd_rally_checkout = ''
-      } else {
-        cmd_rally_checkout = "git clone -b ${branch ?: 'master'} ${repository} test_config; "
-        if (scenarios == '') {
-          cmd_rally_start = "rally $rally_extra_args task start test_config/rally-k8s/run-namespaced-pod.yaml "
-        } else {
-          cmd_rally_start = "rally $rally_extra_args task start scenarios.yaml "
-          cmd_rally_checkout += "if [ -f ${scenarios} ]; then cp ${scenarios} scenarios.yaml; " +
-              "else " +
-              "find -L ${scenarios} -name '*.yaml' -exec cat {} >> scenarios.yaml \\; ; " +
-              "sed -i '/---/d' scenarios.yaml; fi; "
-        }
-      }
     } else {
       throw new Exception("Platform ${platform} is not supported yet")
     }
-    if (repository != '' ) {
+    cmd_rally_checkout += bundle_up_scenarios(scenarios, skip_list, "scenarios_${platform.type}.yaml")
+    cmd_rally_start = "rally $rally_extra_args task start scenarios_${platform.type}.yaml "
+    if (config_repo != '' ) {
       switch(tasks_args_file) {
         case 'none':
           cmd_rally_task_args = '; '
@@ -352,12 +370,18 @@ def runRallyTests(master, target, dockerImageLink, platform, output_dir, reposit
         break
       }
     }
-    full_cmd = cmd_rally_init + cmd_rally_checkout + cmd_rally_start + cmd_rally_task_args + cmd_report
+    cmd_rally_report= "rally task export --type junit-xml --to ${dest_folder}/report-rally.xml; " +
+        "rally task report --out ${dest_folder}/report-rally.html"
+    full_cmd = 'set -xe; ' + cmd_rally_plugins +
+        cmd_rally_init + cmd_rally_checkout +
+        'set +e; ' + cmd_rally_start +
+        cmd_rally_task_args + cmd_rally_stacklight +
+        cmd_rally_report
     salt.runSaltProcessStep(master, target, 'file.touch', ["${results}/rally.db"])
     salt.cmdRun(master, target, "chmod 666 ${results}/rally.db")
-    salt.cmdRun(master, target, "docker run -i --rm --net=host -e ${env_vars} " +
+    salt.cmdRun(master, target, "docker run -w /home/rally -i --rm --net=host -e ${env_vars} " +
         "-v ${results}:${dest_folder} " +
-        "-v ${results}/rally.db:/home/rally/.rally/rally.db " +
+        "-v ${results}/rally.db:/home/rally/data/rally.db " +
         "--entrypoint /bin/bash ${dockerImageLink} " +
         "-c \"${full_cmd}\" > ${results}/${output_file}")
     addFiles(master, target, results, output_dir)
@@ -469,15 +493,21 @@ def configureContainer(master, target, proxy, testing_tools_repo, tempest_repo,
                        conf_script_path="", ext_variables = []) {
     def salt = new com.mirantis.mk.Salt()
     if (testing_tools_repo != "" ) {
-        salt.cmdRun(master, target, "docker exec cvp git clone ${testing_tools_repo} cvp-configuration")
-        configure_script = conf_script_path != "" ? conf_script_path : "cvp-configuration/configure.sh"
-    } else {
-        configure_script = conf_script_path != "" ? conf_script_path : "/opt/devops-qa-tools/deployment/configure.sh"
+        if (testing_tools_repo.contains('http://') || testing_tools_repo.contains('https://')) {
+            salt.cmdRun(master, target, "docker exec cvp git clone ${testing_tools_repo} cvp-configuration")
+            configure_script = conf_script_path != "" ? conf_script_path : "cvp-configuration/configure.sh"
+        }
+        else {
+            configure_script = testing_tools_repo
+        }
+        ext_variables.addAll("PROXY=${proxy}", "TEMPEST_REPO=${tempest_repo}",
+                             "TEMPEST_ENDPOINT_TYPE=${tempest_endpoint_type}",
+                             "tempest_version=${tempest_version}")
+        salt.cmdRun(master, target, "docker exec -e " + ext_variables.join(' -e ') + " cvp bash -c ${configure_script}")
     }
-    ext_variables.addAll("PROXY=${proxy}", "TEMPEST_REPO=${tempest_repo}",
-                         "TEMPEST_ENDPOINT_TYPE=${tempest_endpoint_type}",
-                         "tempest_version=${tempest_version}")
-    salt.cmdRun(master, target, "docker exec -e " + ext_variables.join(' -e ') + " cvp bash -c ${configure_script}")
+    else {
+        common.infoMsg("TOOLS_REPO is empty, no confguration is needed for container")
+    }
 }
 
 /**
@@ -664,10 +694,27 @@ def runCleanup(master, target) {
 def prepareVenv(repo_url, proxy) {
     def python = new com.mirantis.mk.Python()
     repo_name = "${repo_url}".tokenize("/").last()
+    if (repo_url.tokenize().size() > 1){
+        if (repo_url.tokenize()[1] == '-b'){
+            repo_name = repo_url.tokenize()[0].tokenize("/").last()
+        }
+    }
+    path_venv = "${env.WORKSPACE}/venv"
+    path_req = "${env.WORKSPACE}/${repo_name}/requirements.txt"
     sh "rm -rf ${repo_name}"
-    withEnv(["HTTPS_PROXY=${proxy}", "HTTP_PROXY=${proxy}", "https_proxy=${proxy}", "http_proxy=${proxy}"]) {
+    // this is temporary W/A for offline deployments
+    // Jenkins slave image has /opt/pip-mirror/ folder
+    // where pip wheels for cvp projects are located
+    if (proxy != 'offline') {
+        withEnv(["HTTPS_PROXY=${proxy}", "HTTP_PROXY=${proxy}", "https_proxy=${proxy}", "http_proxy=${proxy}"]) {
+            sh "git clone ${repo_url}"
+            python.setupVirtualenv(path_venv, "python2", [], path_req, true)
+        }
+    }
+    else {
         sh "git clone ${repo_url}"
-        python.setupVirtualenv("${env.WORKSPACE}/venv", "python2", [], "${env.WORKSPACE}/${repo_name}/requirements.txt", true)
+        sh "virtualenv ${path_venv} --python python2"
+        python.runVirtualenvCommand(path_venv, "pip install --no-index --find-links=/opt/pip-mirror/ -r ${path_req}", true)
     }
 }
 
