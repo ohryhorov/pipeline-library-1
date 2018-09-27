@@ -265,6 +265,7 @@ def cmdRun(saltId, target, cmd, checkResponse = true, batch=null, output = true,
     def common = new com.mirantis.mk.Common()
     def originalCmd = cmd
     common.infoMsg("Running command ${cmd} on ${target}")
+    echo "batch = ${batch} checkResponse = ${checkResponse}"
     if (checkResponse) {
       cmd = cmd + " && echo Salt command execution success"
     }
