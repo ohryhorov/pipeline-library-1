@@ -42,6 +42,7 @@ def checkoutGitRepository(path, url, branch, credentialsId = null, poll = true, 
               [url: url, refspec: branch, credentialsId: credentialsId],
             ],
           ])
+      }
     } else {
       dir(path) {
           checkout(
