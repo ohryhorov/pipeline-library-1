@@ -49,12 +49,17 @@ def setupOpenstackVirtualenv(path, version = 'latest') {
         'cliff==2.8',
         // NOTE(vsaienko): cmd2 is dependency for cliff, since we don't using upper-contstraints
         // we have to pin cmd2 < 0.9.0 as later versions are not compatible with python2.
+        // the same for warlock package due: https://github.com/bcwaldon/warlock/commit/4241a7a9fbccfce7eb3298c2abdf00ca2dede64a
         // TODO(vsaienko): use upper-constraints here, as in requirements we set only lowest library
         //                 versions.
         'cmd2<0.9.0;python_version=="2.7"',
         'cmd2>=0.9.1;python_version=="3.4"',
         'cmd2>=0.9.1;python_version=="3.5"',
+        'warlock<=1.3.1;python_version=="2.7"',
+        'warlock>1.3.1;python_version=="3.4"',
+        'warlock>1.3.1;python_version=="3.5"',
         'python-openstackclient',
+        'python-octaviaclient',
         'python-heatclient',
         'docutils'
     ]
@@ -162,15 +167,17 @@ def createHeatEnv(file, environment = [], original_file = null) {
 }
 
 /**
- * Create new OpenStack Heat stack
+ * Create new OpenStack Heat stack. Will wait for action to be complited in
+ * specified amount of time (by default 120min)
  *
  * @param env          Connection parameters for OpenStack API endpoint
  * @param template     HOT template for the new Heat stack
  * @param environment  Environmentale parameters of the new Heat stack
  * @param name         Name of the new Heat stack
  * @param path         Optional path to the custom virtualenv
+ * @param timeout      Optional number in minutes to wait for stack action is applied.
  */
-def createHeatStack(client, name, template, params = [], environment = null, path = null, action="create") {
+def createHeatStack(client, name, template, params = [], environment = null, path = null, action="create", timeout=120) {
     def python = new com.mirantis.mk.Python()
     def templateFile = "${env.WORKSPACE}/template/template/${template}.hot"
     def envFile
@@ -192,41 +199,17 @@ def createHeatStack(client, name, template, params = [], environment = null, pat
     }
 
     def cmd
-    def waitState
+    def cmd_args = "-t ${templateFile} -e ${envFile} --timeout ${timeout} --wait ${name}"
 
     if (action == "create") {
-        cmd = "heat stack-create -f ${templateFile} -e ${envFile} ${name}"
-        waitState = "CREATE_COMPLETE"
+        cmd = "openstack stack create ${cmd_args}"
     } else {
-        cmd = "heat stack-update -f ${templateFile} -e ${envFile} ${name}"
-        waitState = "UPDATE_COMPLETE"
+        cmd = "openstack stack update ${cmd_args}"
     }
 
     dir("${env.WORKSPACE}/template/template") {
-        outputTable = runOpenstackCommand(cmd, client, path)
+        def out = runOpenstackCommand(cmd, client, path)
     }
-
-    output = python.parseTextTable(outputTable, 'item', 'prettytable', path)
-
-    def heatStatusCheckerCount = 1
-    while (heatStatusCheckerCount <= 250) {
-        status = getHeatStackStatus(client, name, path)
-        echo("[Heat Stack] Status: ${status}, Check: ${heatStatusCheckerCount}")
-
-        if (status.contains('CREATE_FAILED')) {
-            info = getHeatStackInfo(client, name, path)
-            throw new Exception(info.stack_status_reason)
-
-        } else if (status.contains(waitState)) {
-            info = getHeatStackInfo(client, name, path)
-            echo(info.stack_status_reason)
-            break
-        }
-
-        sleep(30)
-        heatStatusCheckerCount++
-    }
-    echo("[Heat Stack] Status: ${status}")
 }
 
 /**
@@ -456,22 +439,41 @@ def stopServices(env, probe, target, services=[], confirm=false) {
 /**
  * Return intersection of globally installed services and those are
  * defined on specific target according to theirs priorities.
+ * By default services are added to the result list only if
+ * <service>.upgrade.enabled pillar is set to "True". However if it
+ * is needed to obtain list of upgrade services regardless of
+ * <service>.upgrade.enabled pillar value it is needed to set
+ * "upgrade_condition" param to "False".
  *
  * @param env     Salt Connection object or env
- * @param target  The target node to get list of apps for.
+ * @param target  The target node to get list of apps for
+ * @param upgrade_condition  Whether to take "upgrade:enabled"
+ *                           service pillar into consideration
+ *                           when obtaining list of upgrade services
 **/
-def getOpenStackUpgradeServices(env, target){
+def getOpenStackUpgradeServices(env, target, upgrade_condition=true){
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
 
     def global_apps = salt.getConfig(env, 'I@salt:master:enabled:true', 'orchestration.upgrade.applications')
     def node_apps = salt.getPillar(env, target, '__reclass__:applications')['return'][0].values()[0]
+    if (upgrade_condition) {
+        node_pillar = salt.getPillar(env, target)
+    }
     def node_sorted_apps = []
     if ( !global_apps['return'][0].values()[0].isEmpty() ) {
         Map<String,Integer> _sorted_apps = [:]
         for (k in global_apps['return'][0].values()[0].keySet()) {
             if (k in node_apps) {
-              _sorted_apps[k] = global_apps['return'][0].values()[0][k].values()[0].toInteger()
+                if (upgrade_condition) {
+                    if (node_pillar['return'][0].values()[k]['upgrade']['enabled'][0] != null) {
+                        if (node_pillar['return'][0].values()[k]['upgrade']['enabled'][0].toBoolean()) {
+                            _sorted_apps[k] = global_apps['return'][0].values()[0][k].values()[0].toInteger()
+                        }
+                    }
+                } else {
+                    _sorted_apps[k] = global_apps['return'][0].values()[0][k].values()[0].toInteger()
+                }
             }
         }
         node_sorted_apps = common.SortMapByValueAsc(_sorted_apps).keySet()
@@ -482,7 +484,6 @@ def getOpenStackUpgradeServices(env, target){
 
   return node_sorted_apps
 }
-
 
 /**
  * Run specified upgrade phase for all services on given node.
@@ -526,62 +527,30 @@ def applyOpenstackAppsStates(env, target){
     }
 }
 
-/**
- * Restores Galera database
- * @param env Salt Connection object or pepperEnv
- * @return output of salt commands
- */
-def restoreGaleraDb(env) {
-    def salt = new com.mirantis.mk.Salt()
+def verifyGaleraStatus(env, slave=false, checkTimeSync=false) {
     def common = new com.mirantis.mk.Common()
-    try {
-        salt.runSaltProcessStep(env, 'I@galera:slave', 'service.stop', ['mysql'])
-    } catch (Exception er) {
-        common.warningMsg('Mysql service already stopped')
-    }
-    try {
-        salt.runSaltProcessStep(env, 'I@galera:master', 'service.stop', ['mysql'])
-    } catch (Exception er) {
-        common.warningMsg('Mysql service already stopped')
-    }
-    try {
-        salt.cmdRun(env, 'I@galera:slave', "rm /var/lib/mysql/ib_logfile*")
-    } catch (Exception er) {
-        common.warningMsg('Files are not present')
-    }
-    try {
-        salt.cmdRun(env, 'I@galera:master', "mkdir /root/mysql/mysql.bak")
-    } catch (Exception er) {
-        common.warningMsg('Directory already exists')
-    }
-    try {
-        salt.cmdRun(env, 'I@galera:master', "rm -rf /root/mysql/mysql.bak/*")
-    } catch (Exception er) {
-        common.warningMsg('Directory already empty')
-    }
-    try {
-        salt.cmdRun(env, 'I@galera:master', "mv /var/lib/mysql/* /root/mysql/mysql.bak")
-    } catch (Exception er) {
-        common.warningMsg('Files were already moved')
-    }
-    try {
-        salt.runSaltProcessStep(env, 'I@galera:master', 'file.remove', ["/var/lib/mysql/.galera_bootstrap"])
-    } catch (Exception er) {
-        common.warningMsg('File is not present')
-    }
-    salt.cmdRun(env, 'I@galera:master', "sed -i '/gcomm/c\\wsrep_cluster_address=\"gcomm://\"' /etc/mysql/my.cnf")
-    def backup_dir = salt.getReturnValues(salt.getPillar(env, "I@galera:master", 'xtrabackup:client:backup_dir'))
-    if(backup_dir == null || backup_dir.isEmpty()) { backup_dir='/var/backups/mysql/xtrabackup' }
-    salt.runSaltProcessStep(env, 'I@galera:master', 'file.remove', ["${backup_dir}/dbrestored"])
-    salt.cmdRun(env, 'I@xtrabackup:client', "su root -c 'salt-call state.sls xtrabackup'")
-    salt.runSaltProcessStep(env, 'I@galera:master', 'service.start', ['mysql'])
+    def galera = new com.mirantis.mk.Galera()
+    common.warningMsg("verifyGaleraStatus method was moved to Galera class. Please change your calls accordingly.")
+    return galera.verifyGaleraStatus(env, slave, checkTimeSync)
+}
 
-    // wait until mysql service on galera master is up
-    try {
-        salt.commandStatus(env, 'I@galera:master', 'service mysql status', 'running')
-    } catch (Exception er) {
-        input message: "Database is not running please fix it first and only then click on PROCEED."
-    }
+def validateAndPrintGaleraStatusReport(env, out, minion) {
+    def common = new com.mirantis.mk.Common()
+    def galera = new com.mirantis.mk.Galera()
+    common.warningMsg("validateAndPrintGaleraStatusReport method was moved to Galera class. Please change your calls accordingly.")
+    return galera.validateAndPrintGaleraStatusReport(env, out, minion)
+}
 
-    salt.runSaltProcessStep(env, 'I@galera:slave', 'service.start', ['mysql'])
+def getGaleraLastShutdownNode(env) {
+    def common = new com.mirantis.mk.Common()
+    def galera = new com.mirantis.mk.Galera()
+    common.warningMsg("getGaleraLastShutdownNode method was moved to Galera class. Please change your calls accordingly.")
+    return galera.getGaleraLastShutdownNode(env)
+}
+
+def restoreGaleraDb(env) {
+    def common = new com.mirantis.mk.Common()
+    def galera = new com.mirantis.mk.Galera()
+    common.warningMsg("restoreGaleraDb method was moved to Galera class. Please change your calls accordingly.")
+    return galera.restoreGaleraDb(env)
 }

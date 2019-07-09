@@ -201,7 +201,8 @@ def getGerritTriggeredBuilds(allBuilds, gerritChange, excludePatchset = null){
     return allBuilds.findAll{job ->
         def cause = job.causes[0]
         if(cause instanceof GerritCause &&
-           cause.getEvent() instanceof com.sonymobile.tools.gerrit.gerritevents.dto.events.PatchsetCreated){
+           (cause.getEvent() instanceof com.sonymobile.tools.gerrit.gerritevents.dto.events.PatchsetCreated ||
+            cause.getEvent() instanceof com.sonymobile.tools.gerrit.gerritevents.dto.events.CommentAdded)) {
             if(excludePatchset == null || excludePatchset == 0){
                 return cause.event.change.number.equals(String.valueOf(gerritChange))
             }else{
@@ -253,4 +254,132 @@ def _getInvalidGerritParams(LinkedHashMap config){
     def missedParams = requiredParams - config.keySet()
     def badParams = config.subMap(requiredParams).findAll{it.value in [null, '']}.keySet()
     return badParams + missedParams
+}
+
+/**
+ * Post Gerrit comment from CI user
+ *
+ * @param config map which contains next params:
+ *  gerritName - gerrit user name (usually GERRIT_NAME property)
+ *  gerritHost - gerrit host (usually GERRIT_HOST property)
+ *  gerritChangeNumber - gerrit change number (usually GERRIT_CHANGE_NUMBER property)
+ *  gerritPatchSetNumber - gerrit patch set number (usually GERRIT_PATCHSET_NUMBER property)
+ *  message - message to send to gerrit review patch
+ *  credentialsId - jenkins credentials id for gerrit
+ */
+def postGerritComment(LinkedHashMap config) {
+    def common = new com.mirantis.mk.Common()
+    def ssh = new com.mirantis.mk.Ssh()
+    String gerritName = config.get('gerritName')
+    String gerritHost = config.get('gerritHost')
+    String gerritChangeNumber = config.get('gerritChangeNumber')
+    String gerritPatchSetNumber = config.get('gerritPatchSetNumber')
+    String message = config.get('message')
+    String credentialsId = config.get('credentialsId')
+
+    ssh.prepareSshAgentKey(credentialsId)
+    ssh.ensureKnownHosts(gerritHost)
+    ssh.agentSh(String.format("ssh -p 29418 %s@%s gerrit review %s,%s -m \"'%s'\" --code-review 0", gerritName, gerritHost, gerritChangeNumber, gerritPatchSetNumber, message))
+}
+
+/**
+ * Return map of dependent patches info for current patch set
+ * based on commit message hints: Depends-On: https://gerrit_address/_CHANGE_NUMBER_
+ * @param changeInfo Map Info about current patch set, such as:
+ *   gerritName Gerrit user name (usually GERRIT_NAME property)
+ *   gerritHost Gerrit host (usually GERRIT_HOST property)
+ *   gerritChangeNumber Gerrit change number (usually GERRIT_CHANGE_NUMBER property)
+ *   credentialsId Jenkins credentials id for gerrit
+ * @return map of dependent patches info
+ */
+LinkedHashMap getDependentPatches(LinkedHashMap changeInfo) {
+    def dependentPatches = [:]
+    def currentChange = getGerritChange(changeInfo.gerritName, changeInfo.gerritHost, changeInfo.gerritChangeNumber, changeInfo.credentialsId, true)
+    def dependentCommits = currentChange.commitMessage.tokenize('\n').findAll { it  ==~ /Depends-On: \b[^ ]+\b(\/)?/  }
+    if (dependentCommits) {
+        dependentCommits.each { commit ->
+            def patchLink = commit.tokenize(' ')[1]
+            def changeNumber = patchLink.tokenize('/')[-1].trim()
+            def dependentCommit = getGerritChange(changeInfo.gerritName, changeInfo.gerritHost, changeNumber, changeInfo.credentialsId, true)
+            if (dependentCommit.status == "NEW") {
+                dependentPatches[dependentCommit.project] = [
+                    'number': dependentCommit.number,
+                    'ref': dependentCommit.currentPatchSet.ref,
+                    'branch': dependentCommit.branch,
+                ]
+            }
+        }
+    }
+    return dependentPatches
+}
+
+/**
+ * Find Gerrit change(s) according to various input parameters like owner, topic, etc.
+ * @param gerritAuth        A map containing information about Gerrit. Should include
+ *                          HOST, PORT and USER
+ * @param changeParams      Parameters to identify Geriit change e.g.: owner, topic,
+ *                          status, branch, project
+ */
+def findGerritChange(credentialsId, LinkedHashMap gerritAuth, LinkedHashMap changeParams) {
+    scriptText = """
+                 ssh -p ${gerritAuth['PORT']} ${gerritAuth['USER']}@${gerritAuth['HOST']} \
+                 gerrit query \
+                 --format JSON \
+                 """
+    changeParams.each {
+        scriptText += " ${it.key}:${it.value}"
+    }
+    scriptText += " | fgrep -v runTimeMilliseconds || :"
+    sshagent([credentialsId]) {
+        jsonChange = sh(
+             script:scriptText,
+             returnStdout: true,
+           ).trim()
+    }
+    return jsonChange
+}
+
+/**
+ * Download Gerrit review by number
+ *
+ * @param credentialsId            credentials ID
+ * @param virtualenv               virtualenv path
+ * @param repoDir                  repository directory
+ * @param gitRemote                the value of git remote
+ * @param changeNum                the number of change to download
+ */
+def getGerritChangeByNum(credentialsId, virtualEnv, repoDir, gitRemote, changeNum) {
+    def python = new com.mirantis.mk.Python()
+    sshagent([credentialsId]) {
+        dir(repoDir) {
+            python.runVirtualenvCommand(virtualEnv, "git review -r ${gitRemote} -d ${changeNum}")
+        }
+    }
+}
+
+/**
+ * Post Gerrit review
+ * @param credentialsId            credentials ID
+ * @param virtualenv               virtualenv path
+ * @param repoDir                  repository directory
+ * @param gitName                  committer name
+ * @param gitEmail                 committer email
+ * @param gitRemote                the value of git remote
+ * @param gitTopic                 the name of the topic
+ * @param gitBranch                the name of git branch
+ */
+def postGerritReview(credentialsId, virtualEnv, repoDir, gitName, gitEmail, gitRemote, gitTopic, gitBranch) {
+    def python = new com.mirantis.mk.Python()
+    def cmdText = """
+                    GIT_COMMITTER_NAME=${gitName} \
+                    GIT_COMMITTER_EMAIL=${gitEmail} \
+                    git review -r ${gitRemote} \
+                    -t ${gitTopic} \
+                    ${gitBranch}
+                  """
+    sshagent([credentialsId]) {
+        dir(repoDir) {
+            python.runVirtualenvCommand(virtualEnv, cmdText)
+        }
+    }
 }

@@ -443,6 +443,37 @@ def parseJSON(jsonString) {
 }
 
 /**
+ *
+ * Deep merge of  Map items. Merges variable number of maps in to onto.
+ *   Using the following rules:
+ *     - Lists are appended
+ *     - Maps are updated
+ *     - other object types are replaced.
+ *
+ *
+ * @param onto Map object to merge in
+ * @param overrides Map objects to merge to onto
+*/
+def mergeMaps(Map onto, Map... overrides){
+    if (!overrides){
+        return onto
+    }
+    else if (overrides.length == 1) {
+        overrides[0]?.each { k, v ->
+            if (v in Map && onto[k] in Map){
+                mergeMaps((Map) onto[k], (Map) v)
+            } else if (v in List) {
+                onto[k] += v
+            } else {
+                onto[k] = v
+            }
+        }
+        return onto
+    }
+    return overrides.inject(onto, { acc, override -> mergeMaps(acc, override ?: [:]) })
+}
+
+/**
  * Test pipeline input parameter existence and validity (not null and not empty string)
  * @param paramName input parameter name (usually uppercase)
   */
@@ -474,18 +505,19 @@ def countHashMapEquals(lm, param, eq) {
  */
 
 def shCmdStatus(cmd) {
+    // Set +x , to hide odd messages about temp file manipulations
     def res = [:]
-    def stderr = sh(script: 'mktemp', returnStdout: true).trim()
-    def stdout = sh(script: 'mktemp', returnStdout: true).trim()
+    def stderr = sh(script: 'set +x ; mktemp', returnStdout: true).trim()
+    def stdout = sh(script: 'set +x ; mktemp', returnStdout: true).trim()
 
     try {
         def status = sh(script: "${cmd} 1>${stdout} 2>${stderr}", returnStatus: true)
-        res['stderr'] = sh(script: "cat ${stderr}", returnStdout: true)
-        res['stdout'] = sh(script: "cat ${stdout}", returnStdout: true)
+        res['stderr'] = sh(script: "set +x; cat ${stderr}", returnStdout: true).trim()
+        res['stdout'] = sh(script: "set +x; cat ${stdout}", returnStdout: true).trim()
         res['status'] = status
     } finally {
-        sh(script: "rm ${stderr}", returnStdout: true)
-        sh(script: "rm ${stdout}", returnStdout: true)
+        sh(script: "set +x; rm ${stderr}")
+        sh(script: "set +x; rm ${stdout}")
     }
 
     return res
@@ -493,6 +525,9 @@ def shCmdStatus(cmd) {
 
 /**
  * Retry commands passed to body
+ *
+ * Don't use common.retry method for retrying salt.enforceState method. Use retries parameter
+ * built-in the salt.enforceState method instead to ensure correct functionality.
  *
  * @param times Number of retries
  * @param delay Delay between retries (in seconds)
@@ -503,15 +538,14 @@ def shCmdStatus(cmd) {
 
 def retry(int times = 5, int delay = 0, Closure body) {
     int retries = 0
-    def exceptions = []
     while (retries++ < times) {
         try {
             return body.call()
         } catch (e) {
+            errorMsg(e.toString())
             sleep(delay)
         }
     }
-    currentBuild.result = "FAILURE"
     throw new Exception("Failed after $times retries")
 }
 
@@ -617,8 +651,9 @@ def diffCheckMultidir(diffData) {
  * return - html-based string
  * TODO: allow to specify subdir for results?
  **/
+
 def comparePillars(compRoot, b_url, grepOpts) {
-    common = new com.mirantis.mk.Common()
+
     // Some global constants. Don't change\move them!
     keyNew = 'new'
     keyRemoved = 'removed'
@@ -642,40 +677,47 @@ def comparePillars(compRoot, b_url, grepOpts) {
                 returnStatus: true
             )
             if (grep_status == 1) {
-                common.warningMsg("Grep regexp ${grepOpts} removed all diff!")
+                warningMsg("Grep regexp ${grepOpts} removed all diff!")
                 diff_status = 0
             }
         }
     }
     // Set job description
-    String description = ''
+    description = ''
     if (diff_status == 1) {
         // Analyse output file and prepare array with results
         String data_ = readFile file: "${compRoot}/pillar.diff"
         def diff_list = diffCheckMultidir(data_.split("\\r?\\n"))
-        common.infoMsg(diff_list)
+        infoMsg(diff_list)
         dir(compRoot) {
             if (diff_list[keyDiff].size() > 0) {
                 if (!fileExists('diff')) {
                     sh('mkdir -p diff')
                 }
                 description += '<b>CHANGED</b><ul>'
-                common.infoMsg('Changed items:')
-                for (item in diff_list[keyDiff]) {
-                    // We don't want to handle sub-dirs structure. So, simply make diff 'flat'
-                    item_f = item.toString().replace('/', '_')
-                    description += "<li><a href=\"${httpWS}/diff/${item_f}/*view*/\">${item}</a></li>"
-                    // Generate diff file
-                    def diff_exit_code = sh([
-                        script      : "diff -U 50 old/${item} new/${item} > diff/${item_f}",
-                        returnStdout: false,
-                        returnStatus: true,
-                    ])
-                    // catch normal errors, diff should always return 1
-                    if (diff_exit_code != 1) {
-                        error 'Error with diff file generation'
-                    }
+                infoMsg('Changed items:')
+                def stepsForParallel = [:]
+                stepsForParallel.failFast = true
+                diff_list[keyDiff].each {
+                    stepsForParallel.put("Differ for:${it}",
+                        {
+                            // We don't want to handle sub-dirs structure. So, simply make diff 'flat'
+                            def item_f = it.toString().replace('/', '_')
+                            description += "<li><a href=\"${httpWS}/diff/${item_f}/*view*/\">${it}</a></li>"
+                            // Generate diff file
+                            def diff_exit_code = sh([
+                                script      : "diff -U 50 old/${it} new/${it} > diff/${item_f}",
+                                returnStdout: false,
+                                returnStatus: true,
+                            ])
+                            // catch normal errors, diff should always return 1
+                            if (diff_exit_code != 1) {
+                                error 'Error with diff file generation'
+                            }
+                        })
                 }
+
+                parallel stepsForParallel
             }
             if (diff_list[keyNew].size() > 0) {
                 description += '<b>ADDED</b><ul>'
@@ -689,7 +731,9 @@ def comparePillars(compRoot, b_url, grepOpts) {
                     description += "<li><a href=\"${httpWS}/old/${item}/*view*/\">${item}</a></li>"
                 }
             }
-
+            def cwd = sh(script: 'basename $(pwd)', returnStdout: true).trim()
+            sh "tar -cf old_${cwd}.tar.gz old/ && rm -rf old/"
+            sh "tar -cf new_${cwd}.tar.gz new/ && rm -rf new/"
         }
     }
 
@@ -702,7 +746,7 @@ def comparePillars(compRoot, b_url, grepOpts) {
         }
         return description.toString()
     } else {
-        return 'No job changes'
+        return '<b>No job changes</b>'
     }
 }
 
@@ -789,8 +833,8 @@ def stageWrapper(stageMap, currentStage, target, interactive = true, Closure bod
         input message: getColorizedString("We are going to execute stage \'${currentStage}\' on the following target ${target}.\nPlease review stage information above.", "yellow")
       }
       try {
-        return body.call()
         stageMap[currentStage]['Status'] = "SUCCESS"
+        return body.call()
       } catch (Exception err) {
         def msg = "Stage ${currentStage} failed with the following exception:\n${err}"
         print getColorizedString(msg, "yellow")
@@ -810,22 +854,168 @@ def stageWrapper(stageMap, currentStage, target, interactive = true, Closure bod
  *  Ugly transition solution for internal tests.
  *  1) Check input => transform to static result, based on runtime and input
  *  2) Check remote-binary repo for exact resource
- */
+ *  Return: changes each linux_system_* cto false, in case broken url in some of them
+  */
 
 def checkRemoteBinary(LinkedHashMap config, List extraScmExtensions = []) {
     def common = new com.mirantis.mk.Common()
-    res = [:]
+    def res = [:]
     res['MirrorRoot'] = config.get('globalMirrorRoot', env["BIN_MIRROR_ROOT"] ? env["BIN_MIRROR_ROOT"] : "http://mirror.mirantis.com/")
     // Reclass-like format's. To make life eazy!
-    res['apt_mk_version'] = config.get('apt_mk_version', env["BIN_APT_MK_VERSION"] ? env["BIN_APT_MK_VERSION"] : 'nightly')
-    res['linux_system_repo_url'] = config.get('linux_system_repo_url', env["BIN_linux_system_repo_url"] ? env["BIN_linux_system_repo_url"] : "${res['MirrorRoot']}/${res['apt_mk_version']}/")
+    res['mcp_version'] = config.get('mcp_version', env["BIN_APT_MCP_VERSION"] ? env["BIN_APT_MCP_VERSION"] : 'nightly')
+    res['linux_system_repo_url'] = config.get('linux_system_repo_url', env['BIN_linux_system_repo_url'] ? env['BIN_linux_system_repo_url'] : "${res['MirrorRoot']}/${res['mcp_version']}/")
+    res['linux_system_repo_ubuntu_url'] = config.get('linux_system_repo_ubuntu_url', env['BIN_linux_system_repo_ubuntu_url'] ? env['BIN_linux_system_repo_ubuntu_url'] : "${res['MirrorRoot']}/${res['mcp_version']}/ubuntu/")
+    res['linux_system_repo_mcp_salt_url'] = config.get('linux_system_repo_mcp_salt_url', env['BIN_linux_system_repo_mcp_salt_url'] ? env['BIN_linux_system_repo_mcp_salt_url'] : "${res['MirrorRoot']}/${res['mcp_version']}/salt-formulas/")
 
     if (config.get('verify', true)) {
-        MirrorRootStatus = sh(script: "wget  --auth-no-challenge --spider ${res['linux_system_repo_url']} 2>/dev/null", returnStatus: true)
-        if (MirrorRootStatus != '0') {
-            common.warningMsg("Resource: ${res['linux_system_repo_url']} not exist")
-            res['linux_system_repo_url'] = false
+        res.each { key, val ->
+            if (key.toString().startsWith('linux_system_repo')) {
+                def MirrorRootStatus = sh(script: "wget  --auth-no-challenge --spider ${val} 2>/dev/null", returnStatus: true)
+                if (MirrorRootStatus != 0) {
+                    common.warningMsg("Resource: '${key}' at '${val}' not exist!")
+                    res[key] = false
+                }
+            }
         }
     }
     return res
+}
+
+/**
+ *  Workaround to update env properties, like GERRIT_* vars,
+ *  which should be passed from upstream job to downstream.
+ *  Will not fail entire job in case any issues.
+ *  @param envVar - EnvActionImpl env job
+ *  @param extraVars - Multiline YAML text with extra vars
+ */
+def mergeEnv(envVar, extraVars) {
+    def common = new com.mirantis.mk.Common()
+    try {
+        def extraParams = readYaml text: extraVars
+        for(String key in extraParams.keySet()) {
+            envVar[key] = extraParams[key]
+            common.warningMsg("Parameter ${key} is updated from EXTRA vars.")
+        }
+    } catch (Exception e) {
+        common.errorMsg("Can't update env parameteres, because: ${e.toString()}")
+    }
+}
+
+/**
+ * Wrapper around parallel pipeline function
+ * with ability to restrict number of parallel threads
+ * running simultaneously
+ *
+ * @param branches - Map with Clousers to be executed
+ * @param maxParallelJob - Integer number of parallel threads allowed
+ *                         to run simultaneously
+ */
+def runParallel(branches, maxParallelJob = 10) {
+    def runningSteps = 0
+    branches.each { branchName, branchBody ->
+        if (branchBody instanceof Closure) {
+            branches[branchName] = {
+                while (!(runningSteps < maxParallelJob)) {
+                    continue
+                }
+                runningSteps += 1
+                branchBody.call()
+                runningSteps -= 1
+            }
+        }
+    }
+    if (branches) {
+        parallel branches
+    }
+}
+
+/**
+ * Ugly processing basic funcs with /etc/apt
+ * @param repoConfig YAML text or Map
+ * Example :
+ repoConfig = '''
+ ---
+ aprConfD: |-
+   APT::Get::AllowUnauthenticated 'true';
+ repo:
+   mcp_saltstack:
+     source: "deb [arch=amd64] http://mirror.mirantis.com/nightly/saltstack-2017.7/xenial xenial main"
+     pin:
+       - package: "libsodium18"
+         pin: "release o=SaltStack"
+         priority: 50
+       - package: "*"
+         pin: "release o=SaltStack"
+         priority: "1100"
+     repo_key: "http://mirror.mirantis.com/public.gpg"
+ '''
+ *
+ */
+
+def debianExtraRepos(repoConfig) {
+    def config = null
+    if (repoConfig instanceof Map) {
+        config = repoConfig
+    } else {
+        config = readYaml text: repoConfig
+    }
+    if (config.get('repo', false)) {
+        for (String repo in config['repo'].keySet()) {
+            source = config['repo'][repo]['source']
+            warningMsg("Write ${source} >  /etc/apt/sources.list.d/${repo}.list")
+            sh("echo '${source}' > /etc/apt/sources.list.d/${repo}.list")
+            if (config['repo'][repo].containsKey('repo_key')) {
+                key = config['repo'][repo]['repo_key']
+                sh("wget -O - '${key}' | apt-key add -")
+            }
+            if (config['repo'][repo]['pin']) {
+                def repoPins = []
+                for (Map pin in config['repo'][repo]['pin']) {
+                    repoPins.add("Package: ${pin['package']}")
+                    repoPins.add("Pin: ${pin['pin']}")
+                    repoPins.add("Pin-Priority: ${pin['priority']}")
+                    // additional empty line between pins
+                    repoPins.add('\n')
+                }
+                if (repoPins) {
+                    repoPins.add(0, "### Extra ${repo} repo pin start ###")
+                    repoPins.add("### Extra ${repo} repo pin end ###")
+                    repoPinning = repoPins.join('\n')
+                    warningMsg("Adding pinning \n${repoPinning}\n => /etc/apt/preferences.d/${repo}")
+                    sh("echo '${repoPinning}' > /etc/apt/preferences.d/${repo}")
+                }
+            }
+        }
+    }
+    if (config.get('aprConfD', false)) {
+        for (String pref in config['aprConfD'].tokenize('\n')) {
+            warningMsg("Adding ${pref} => /etc/apt/apt.conf.d/99setupAndTestNode")
+            sh("echo '${pref}' >> /etc/apt/apt.conf.d/99setupAndTestNode")
+        }
+        sh('cat /etc/apt/apt.conf.d/99setupAndTestNode')
+    }
+}
+
+/**
+ * Parse date from string
+ * @param String date - date to parse
+ * @param String format - date format in provided date string value
+ *
+ * return new Date() object
+ */
+Date parseDate(String date, String format) {
+    return Date.parse(format, date)
+}
+
+/**
+ * Generate Random Hash string
+ * @param n Hash length
+ * @param pool Pool to use for hash generation
+*/
+def generateRandomHashString(int n, ArrayList pool = []) {
+    if (!pool) {
+        pool = ['a'..'z','A'..'Z',0..9,'_','+','='].flatten()
+    }
+    Random rand = new Random(System.currentTimeMillis())
+    return (1..n).collect { pool[rand.nextInt(pool.size())] }.join()
 }

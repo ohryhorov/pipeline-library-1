@@ -1,20 +1,24 @@
 package com.mirantis.mcp
 
 /**
- *
+ * DEPRECATED
  * Tests providing functions
  *
  */
 
 /**
  * Run docker container with basic (keystone) parameters
+ * For backward compatibility. Deprecated.
+ * Will be removed soon.
  *
  * @param target            Host to run container
  * @param dockerImageLink   Docker image link. May be custom or default rally image
  */
-def runBasicContainer(master, target, dockerImageLink="xrally/xrally-openstack:0.9.1"){
+def runBasicContainer(master, target, dockerImageLink="xrally/xrally-openstack:0.10.1"){
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
+    common.errorMsg('You are using deprecated method! Please migrate to validate.runContainer. This method will be removed')
+    error('You are using deprecated method! Please migrate to validate.runContainer. This method will be removed')
     def _pillar = salt.getPillar(master, 'I@keystone:server', 'keystone:server')
     def keystone = _pillar['return'][0].values()[0]
     if ( salt.cmdRun(master, target, "docker ps -f name=cvp -q", false, null, false)['return'][0].values()[0] ) {
@@ -25,6 +29,128 @@ def runBasicContainer(master, target, dockerImageLink="xrally/xrally-openstack:0
             "-e OS_PASSWORD=${keystone.admin_password} -e OS_TENANT_NAME=${keystone.admin_tenant} " +
             "-e OS_AUTH_URL=http://${keystone.bind.private_address}:${keystone.bind.private_port}/v2.0 " +
             "-e OS_REGION_NAME=${keystone.region} -e OS_ENDPOINT_TYPE=admin --entrypoint /bin/bash ${dockerImageLink}")
+}
+
+
+/**
+ * Run docker container with parameters
+ *
+ * @param target                Host to run container
+ * @param dockerImageLink       Docker image link. May be custom or default rally image
+ * @param name                  Name for container
+ * @param env_var               Environment variables to set in container
+ * @param entrypoint            Set entrypoint to /bin/bash or leave default
+ * @param mounts                Map with mounts for container
+**/
+
+def runContainer(Map params){
+    def common = new com.mirantis.mk.Common()
+    defaults = ["name": "cvp", "env_var": [], "entrypoint": true]
+    params = defaults + params
+    def salt = new com.mirantis.mk.Salt()
+    def variables = ''
+    def entry_point = ''
+    def tempest_conf_mount = ''
+    def mounts = ''
+    def cluster_name = salt.getPillar(params.master, 'I@salt:master', '_param:cluster_name')['return'][0].values()[0]
+    default_mounts = ["/etc/ssl/certs/": "/etc/ssl/certs/",
+                      "/srv/salt/pki/${cluster_name}/": "/etc/certs",
+                      "/root/test/": "/root/tempest/",
+                      "/tmp/": "/tmp/",
+                      "/etc/hosts": "/etc/hosts"]
+    params.mounts = default_mounts + params.mounts
+    if ( salt.cmdRun(params.master, params.target, "docker ps -f name=${params.name} -q", false, null, false)['return'][0].values()[0] ) {
+        salt.cmdRun(params.master, params.target, "docker rm -f ${params.name}")
+    }
+    if (params.env_var.size() > 0) {
+        variables = ' -e ' + params.env_var.join(' -e ')
+    }
+    if (params.entrypoint) {
+        entry_point = '--entrypoint /bin/bash'
+    }
+    params.mounts.each { local, container ->
+        mounts = mounts + " -v ${local}:${container}"
+    }
+    salt.cmdRun(params.master, params.target, "docker run -tid --net=host --name=${params.name}" +
+                                "${mounts} -u root ${entry_point} ${variables} ${params.dockerImageLink}")
+}
+
+def runContainer(master, target, dockerImageLink, name='cvp', env_var=[], entrypoint=true, mounts=[:]){
+    def common = new com.mirantis.mk.Common()
+    common.infoMsg("This method will be deprecated. Convert you method call to use Map as input parameter")
+    // Convert to Map
+    params = ['master': master, 'target': target, 'dockerImageLink': dockerImageLink, 'name': name, 'env_var': env_var,
+              'entrypoint': entrypoint, 'mounts': mounts]
+    // Call new method with Map as parameter
+    return runContainer(params)
+}
+
+/**
+ * Get v2 Keystone credentials from pillars
+ *
+ */
+def _get_keystone_creds_v2(master){
+    def salt = new com.mirantis.mk.Salt()
+    def common = new com.mirantis.mk.Common()
+    def keystone = []
+    _pillar = false
+    common.infoMsg("Fetching Keystone v2 credentials")
+    _response = salt.runSaltProcessStep(master, 'I@keystone:server', 'pillar.get', 'keystone:server', null, false, 1)['return'][0]
+    for (i = 0; i < _response.keySet().size(); i++) {
+        if ( _response.values()[i] ) {
+            _pillar = _response.values()[i]
+        }
+    }
+    if (_pillar) {
+        keystone.add("OS_USERNAME=${_pillar.admin_name}")
+        keystone.add("OS_PASSWORD=${_pillar.admin_password}")
+        keystone.add("OS_TENANT_NAME=${_pillar.admin_tenant}")
+        keystone.add("OS_AUTH_URL=http://${_pillar.bind.private_address}:${_pillar.bind.private_port}/v2.0")
+        keystone.add("OS_REGION_NAME=${_pillar.region}")
+        keystone.add("OS_ENDPOINT_TYPE=admin")
+        return keystone
+    }
+    else {
+        throw new Exception("Cannot fetch Keystone v2 credentials. Response: ${_response}")
+    }
+}
+
+/**
+ * Get v3 Keystone credentials from pillars
+ *
+ */
+def _get_keystone_creds_v3(master){
+    def salt = new com.mirantis.mk.Salt()
+    def common = new com.mirantis.mk.Common()
+    _pillar = false
+    pillar_name = 'keystone:client:os_client_config:cfgs:root:content:clouds:admin_identity'
+    common.infoMsg("Fetching Keystone v3 credentials")
+    _response = salt.runSaltProcessStep(master, 'I@keystone:server', 'pillar.get', pillar_name, null, false, 1)['return'][0]
+    for (i = 0; i < _response.keySet().size(); i++) {
+        if ( _response.values()[i] ) {
+            _pillar = _response.values()[i]
+        }
+    }
+    def keystone = []
+    if (_pillar) {
+        keystone.add("OS_USERNAME=${_pillar.auth.username}")
+        keystone.add("OS_PASSWORD=${_pillar.auth.password}")
+        keystone.add("OS_TENANT_NAME=${_pillar.auth.project_name}")
+        keystone.add("OS_PROJECT_NAME=${_pillar.auth.project_name}")
+        keystone.add("OS_AUTH_URL=${_pillar.auth.auth_url}/v3")
+        keystone.add("OS_REGION_NAME=${_pillar.region_name}")
+        keystone.add("OS_IDENTITY_API_VERSION=${_pillar.identity_api_version}")
+        keystone.add("OS_ENDPOINT_TYPE=internal")
+        keystone.add("OS_PROJECT_DOMAIN_NAME=${_pillar.auth.project_domain_name}")
+        keystone.add("OS_USER_DOMAIN_NAME=${_pillar.auth.user_domain_name}")
+        // we mount /srv/salt/pki/${cluster_name}/:/etc/certs with certs for cvp container
+        keystone.add("OS_CACERT='/etc/certs/proxy-with-chain.crt'")
+        return keystone
+    }
+    else {
+        common.warningMsg("Failed to fetch Keystone v3 credentials")
+        return false
+    }
 }
 
 /**
@@ -75,6 +201,7 @@ def addFiles(master, target, folder, output_dir) {
 }
 
 /**
+ * DEPRECATED
  * Get reclass value
  *
  * @param target            The host for which the values will be provided
@@ -83,6 +210,8 @@ def addFiles(master, target, folder, output_dir) {
  */
 def getReclassValue(master, target, filter) {
     def common = new com.mirantis.mk.Common()
+    common.errorMsg('You are using deprecated method! This method will be removed')
+    error('You are using deprecated method! This method will be removed')
     def salt = new com.mirantis.mk.Salt()
     def items = filter.tokenize('.')
     def _result = salt.cmdRun(master, 'I@salt:master', "reclass-salt -o json -p ${target}", false, null, false)
@@ -96,6 +225,7 @@ def getReclassValue(master, target, filter) {
 }
 
 /**
+ * DEPRECATED
  * Create list of nodes in JSON format.
  *
  * @param filter            The Salt's matcher
@@ -104,6 +234,8 @@ def getReclassValue(master, target, filter) {
 def getNodeList(master, filter = null) {
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
+    common.errorMsg('You are using deprecated method! This method will be removed')
+    error('You are using deprecated method! This method will be removed')
     def nodes = []
     def filtered_list = null
     def controllers = salt.getMinions(master, 'I@nova:controller')
@@ -135,7 +267,9 @@ def getNodeList(master, filter = null) {
 }
 
 /**
+ * DEPRECATED
  * Execute mcp sanity tests
+ * Deprecated. Will be removed soon
  *
  * @param salt_url          Salt master url
  * @param salt_credentials  Salt credentials
@@ -145,6 +279,8 @@ def getNodeList(master, filter = null) {
  */
 def runSanityTests(salt_url, salt_credentials, test_set="", output_dir="validation_artifacts/", env_vars="") {
     def common = new com.mirantis.mk.Common()
+    common.errorMsg('You are using deprecated method! Please migrate to validate.runTests. This method will be removed')
+    error('You are using deprecated method! Please migrate to validate.runTests. This method will be removed')
     def creds = common.getCredentials(salt_credentials)
     def username = creds.username
     def password = creds.password
@@ -162,7 +298,51 @@ def runSanityTests(salt_url, salt_credentials, test_set="", output_dir="validati
 }
 
 /**
+ * DEPRECATED
  * Execute pytest framework tests
+ *
+ * @param salt_url          Salt master url
+ * @param salt_credentials  Salt credentials
+ * @param test_set          Test set to run
+ * @param env_vars          Additional environment variables for cvp-sanity-checks
+ * @param output_dir        Directory for results
+ */
+def runPyTests(salt_url, salt_credentials, test_set="", env_vars="", name='cvp', container_node="", remote_dir='/root/qa_results/', artifacts_dir='validation_artifacts/') {
+    def xml_file = "${name}_report.xml"
+    def common = new com.mirantis.mk.Common()
+    common.errorMsg('You are using deprecated method! Please migrate to validate.runTests. This method will be removed')
+    error('You are using deprecated method! Please migrate to validate.runTests. This method will be removed')
+    def salt = new com.mirantis.mk.Salt()
+    def creds = common.getCredentials(salt_credentials)
+    def username = creds.username
+    def password = creds.password
+    if (container_node != "") {
+        def saltMaster
+        saltMaster = salt.connection(salt_url, salt_credentials)
+        def script = "pytest --junitxml ${xml_file} --tb=short -sv ${test_set}"
+        env_vars.addAll("SALT_USERNAME=${username}", "SALT_PASSWORD=${password}",
+                        "SALT_URL=${salt_url}")
+        variables = ' -e ' + env_vars.join(' -e ')
+        salt.cmdRun(saltMaster, container_node, "docker exec ${variables} ${name} bash -c '${script}'", false)
+        salt.cmdRun(saltMaster, container_node, "docker cp ${name}:/var/lib/${xml_file} ${remote_dir}${xml_file}")
+        addFiles(saltMaster, container_node, remote_dir+xml_file, artifacts_dir)
+    }
+    else {
+        if (env_vars.size() > 0) {
+        variables = 'export ' + env_vars.join(';export ')
+        }
+        def script = ". ${env.WORKSPACE}/venv/bin/activate; ${variables}; " +
+                     "pytest --junitxml ${artifacts_dir}${xml_file} --tb=short -sv ${env.WORKSPACE}/${test_set}"
+        withEnv(["SALT_USERNAME=${username}", "SALT_PASSWORD=${password}", "SALT_URL=${salt_url}"]) {
+            def statusCode = sh script:script, returnStatus:true
+        }
+    }
+}
+
+/**
+ * Execute pytest framework tests
+ * For backward compatibility
+ * Will be removed soon
  *
  * @param salt_url          Salt master url
  * @param salt_credentials  Salt credentials
@@ -189,6 +369,7 @@ def runTests(salt_url, salt_credentials, test_set="", output_dir="validation_art
 }
 
 /**
+ * DEPRECATED
  * Execute tempest tests
  *
  * @param target            Host to run tests
@@ -203,6 +384,9 @@ def runTests(salt_url, salt_credentials, test_set="", output_dir="validation_art
  */
 def runTempestTests(master, target, dockerImageLink, output_dir, confRepository, confBranch, repository, version, pattern = "false", results = '/root/qa_results') {
     def salt = new com.mirantis.mk.Salt()
+    def common = new com.mirantis.mk.Common()
+    common.errorMsg('You are using deprecated method! This method will be removed')
+    error('You are using deprecated method! This method will be removed')
     def output_file = 'docker-tempest.log'
     def dest_folder = '/home/rally/qa_results'
     def skip_list = '--skip-list /opt/devops-qa-tools/deployment/skip_contrail.list'
@@ -247,7 +431,7 @@ def runTempestTests(master, target, dockerImageLink, output_dir, confRepository,
  * @param skip_scenarios    Comma-delimited list of scenarios names to skip
  * @param bundle_file       Bundle name to create
 */
-def bundle_up_scenarios(scenarios_path, skip_scenarios, bundle_file) {
+def bundle_up_scenarios(scenarios_path, skip_scenarios, bundle_file = '' ) {
       def skip_names = ''
       def skip_dirs = ''
       def result = ''
@@ -257,137 +441,189 @@ def bundle_up_scenarios(scenarios_path, skip_scenarios, bundle_file) {
             skip_names += "! -name ${scen} "
           }
           else {
-            skip_dirs += "-path ${scenarios_path}/${scen} -prune -o "
+            skip_dirs += "-path '${scenarios_path}/${scen}' -prune -o "
           }
         }
       }
-      result = "if [ -f ${scenarios_path} ]; then cp ${scenarios_path} ${bundle_file}; " +
+      if (bundle_file != '') {
+        result = "if [ -f ${scenarios_path} ]; then cp ${scenarios_path} ${bundle_file}; " +
           "else " +
           "find -L ${scenarios_path} " + skip_dirs +
           " -name '*.yaml' " + skip_names +
           "-exec cat {} >> ${bundle_file} \\; ; " +
           "sed -i '/---/d' ${bundle_file}; fi; "
+      } else {
+        result = "find -L ${scenarios_path} " + skip_dirs +
+            " -name '*.yaml' -print " + skip_names
+      }
 
       return result
 }
 
 /**
- * Execute rally tests
+ * Prepare setupDockerAndTest() commands to start Rally tests (optionally with K8S/Stacklight plugins)
  *
- * @param target            Host to run tests
- * @param dockerImageLink   Docker image link
- * @param platform          What do we have underneath (openstack/k8s)
- * @param output_dir        Directory for results
- * @param config_repo       Git repository with with files for Rally
- * @param config_branch     Git config repo branch which will be used during the checkout
- * @param plugins_repo      Git repository with Rally plugins
- * @param plugins_branch    Git plugins repo branch which will be used during the checkout
+ * @param platform          Map with underlay platform data
  * @param scenarios         Directory inside repo with specific scenarios
  * @param sl_scenarios      Directory inside repo with specific scenarios for stacklight
  * @param tasks_args_file   Argument file that is used for throttling settings
- * @param ext_variables     The list of external variables
- * @param results           The reports directory
+ * @param db_connection_str Rally-compliant external DB connection string
+ * @param tags              Additional tags used for tagging tasks or building trends
+ * @param trends            Build rally trends if enabled
+ *
+ * Returns: map
+ *
  */
-def runRallyTests(master, target, dockerImageLink, platform, output_dir, config_repo, config_branch, plugins_repo, plugins_branch, scenarios, sl_scenarios = '', tasks_args_file = '', ext_variables = [], results = '/root/qa_results', skip_list = '') {
-    def salt = new com.mirantis.mk.Salt()
-    def output_file = 'docker-rally.log'
-    def dest_folder = '/home/rally/qa_results'
-    def env_vars = []
-    def rally_extra_args = ''
-    def cmd_rally_plugins =
-          "git clone -b ${plugins_branch ?: 'master'} ${plugins_repo} /tmp/plugins; " +
-          "sudo pip install --upgrade /tmp/plugins; "
+def runRallyTests(
+        platform, scenarios = '', sl_scenarios = '',
+        tasks_args_file = '', db_connection_str = '', tags = [],
+        trends = false, skip_list = '', generateReport = true
+    ) {
+
+    def dest_folder = '/home/rally'
+    def pluginsDir = "${dest_folder}/rally-plugins"
+    def scenariosDir = "${dest_folder}/rally-scenarios"
+    def resultsDir = "${dest_folder}/test_results"
+    def date = new Date()
+    date = date.format("yyyyMMddHHmm")
+    // compile rally deployment name
+    deployment_name = "env=${platform.cluster_name}:platform=${platform.type}:" +
+        "date=${date}:cmp=${platform.cmp_count}"
+
+    // set up Rally DB
     def cmd_rally_init = ''
-    def cmd_rally_checkout = "git clone -b ${config_branch ?: 'master'} ${config_repo} test_config; "
-    def cmd_rally_start = ''
-    def cmd_rally_task_args = ''
-    def cmd_rally_stacklight = ''
+    if (db_connection_str) {
+        cmd_rally_init = "sudo sed -i -e " +
+            "'s#connection=.*#connection=${db_connection_str}#' " +
+            "/etc/rally/rally.conf; "
+    }
+    cmd_rally_init += 'rally db ensure; '
+    // if several jobs are running in parallel (same deployment name),
+    // then try to find and use existing in db env
+    if (db_connection_str) {
+        cmd_rally_init += 'rally env use --env $(rally env list|awk \'/' +
+            deployment_name + '/ {print $2}\') ||'
+    }
+
+    def cmd_rally_start
+    def cmd_rally_stacklight
+    def cmd_rally_task_args = tasks_args_file ?: 'job-params-light.yaml'
     def cmd_rally_report = ''
-    salt.runSaltProcessStep(master, target, 'file.remove', ["${results}"])
-    salt.runSaltProcessStep(master, target, 'file.mkdir', ["${results}", "mode=777"])
+    def cmd_filter_tags = ''
+    def trends_limit = 20
+
+    // generate html report if required
+    if (generateReport) {
+        cmd_rally_report = 'rally task export ' +
+            '--uuid $(rally task list --uuids-only --status finished) ' +
+            "--type junit-xml --to ${resultsDir}/report-rally.xml; " +
+            'rally task report --uuid $(rally task list --uuids-only --status finished) ' +
+            "--out ${resultsDir}/report-rally.html; "
+    }
+
+    // build rally trends if required
+    if (trends && db_connection_str) {
+        if (tags) {
+            cmd_filter_tags = "--tag " + tags.join(' ')
+        }
+        cmd_rally_report += 'rally task trends --tasks ' +
+            '$(rally task list ' + cmd_filter_tags +
+            ' --all-deployments --uuids-only --status finished ' +
+            "| head -${trends_limit} ) " +
+            "--out ${resultsDir}/trends-rally.html"
+    }
+
+    // add default env tags for inserting into rally tasks
+    tags = tags + [
+        "env=${platform.cluster_name}",
+        "platform=${platform.type}",
+        "cmp=${platform.cmp_count}"
+    ]
+
+    // set up rally deployment cmd
     if (platform['type'] == 'openstack') {
-      def _pillar = salt.getPillar(master, 'I@keystone:server', 'keystone:server')
-      def keystone = _pillar['return'][0].values()[0]
-      env_vars = ( ['tempest_version=15.0.0',
-          "OS_USERNAME=${keystone.admin_name}",
-          "OS_PASSWORD=${keystone.admin_password}",
-          "OS_TENANT_NAME=${keystone.admin_tenant}",
-          "OS_AUTH_URL=http://${keystone.bind.private_address}:${keystone.bind.private_port}/v2.0",
-          "OS_REGION_NAME=${keystone.region}",
-          'OS_ENDPOINT_TYPE=admin'] + ext_variables ).join(' -e ')
-      cmd_rally_init = 'rally db create; ' +
-          'rally deployment create --fromenv --name=existing; ' +
-          'rally deployment config; '
-      if (platform['stacklight_enabled'] == true) {
-        cmd_rally_stacklight = bundle_up_scenarios(sl_scenarios, skip_list, "scenarios_${platform.type}_stacklight.yaml")
-        cmd_rally_stacklight += "rally $rally_extra_args task start scenarios_${platform.type}_stacklight.yaml " +
-            "--task-args-file test_config/job-params-stacklight.yaml; "
-      }
+      cmd_rally_init += "rally deployment create --name='${deployment_name}' --fromenv; " +
+          "rally deployment check; "
     } else if (platform['type'] == 'k8s') {
-      rally_extra_args = "--debug --log-file ${dest_folder}/task.log"
-      def _pillar = salt.getPillar(master, 'I@kubernetes:master and *01*', 'kubernetes:master')
-      def kubernetes = _pillar['return'][0].values()[0]
-      env_vars = [
-          "KUBERNETES_HOST=${kubernetes.apiserver.vip_address}" +
-          ":${kubernetes.apiserver.insecure_port}",
-          "KUBERNETES_CERT_AUTH=${dest_folder}/k8s-ca.crt",
-          "KUBERNETES_CLIENT_KEY=${dest_folder}/k8s-client.key",
-          "KUBERNETES_CLIENT_CERT=${dest_folder}/k8s-client.crt"].join(' -e ')
-      def k8s_ca = salt.getReturnValues(salt.runSaltProcessStep(master,
-                        'I@kubernetes:master and *01*', 'cmd.run',
-                        ["cat /etc/kubernetes/ssl/ca-kubernetes.crt"]))
-      def k8s_client_key = salt.getReturnValues(salt.runSaltProcessStep(master,
-                        'I@kubernetes:master and *01*', 'cmd.run',
-                        ["cat /etc/kubernetes/ssl/kubelet-client.key"]))
-      def k8s_client_crt = salt.getReturnValues(salt.runSaltProcessStep(master,
-                        'I@kubernetes:master and *01*', 'cmd.run',
-                        ["cat /etc/kubernetes/ssl/kubelet-client.crt"]))
-      def tmp_dir = '/tmp/kube'
-      salt.runSaltProcessStep(master, target, 'file.mkdir', ["${tmp_dir}", "mode=777"])
-      writeFile file: "${tmp_dir}/k8s-ca.crt", text: k8s_ca
-      writeFile file: "${tmp_dir}/k8s-client.key", text: k8s_client_key
-      writeFile file: "${tmp_dir}/k8s-client.crt", text: k8s_client_crt
-      salt.cmdRun(master, target, "mv ${tmp_dir}/* ${results}/")
-      salt.runSaltProcessStep(master, target, 'file.rmdir', ["${tmp_dir}"])
-      cmd_rally_init = "rally db recreate; " +
-          "rally env create --name k8s --from-sysenv; " +
-          "rally env check k8s; "
+      cmd_rally_init += "rally env create --name='${deployment_name}' --from-sysenv; " +
+          "rally env check; "
     } else {
       throw new Exception("Platform ${platform} is not supported yet")
     }
-    cmd_rally_checkout += bundle_up_scenarios(scenarios, skip_list, "scenarios_${platform.type}.yaml")
-    cmd_rally_start = "rally $rally_extra_args task start scenarios_${platform.type}.yaml "
-    if (config_repo != '' ) {
-      switch(tasks_args_file) {
-        case 'none':
-          cmd_rally_task_args = '; '
-          break
-        case '':
-          cmd_rally_task_args = '--task-args-file test_config/job-params-light.yaml; '
-          break
-        default:
-          cmd_rally_task_args = "--task-args-file ${tasks_args_file}; "
+
+    // set up rally task args file
+    switch(tasks_args_file) {
+      case 'none':
+        cmd_rally_task_args = ''
+        break
+      case '':
+        cmd_rally_task_args = "--task-args-file ${scenariosDir}/job-params-light.yaml"
+        break
+      default:
+        cmd_rally_task_args = "--task-args-file ${scenariosDir}/${tasks_args_file}"
+      break
+    }
+
+    // configure Rally for Stacklight (only with Openstack for now)
+    if (platform['stacklight']['enabled'] && (platform['type'] == 'openstack')) {
+      if (! sl_scenarios) {
+        throw new Exception("There's no Stacklight scenarios to execute")
+      }
+      def scenBundle = "${resultsDir}/scenarios_${platform.type}_stacklight.yaml"
+      cmd_rally_stacklight = bundle_up_scenarios(
+          scenariosDir + '/' + sl_scenarios,
+          skip_list,
+          scenBundle,
+      )
+      tags.add('stacklight')
+      cmd_rally_stacklight += "sed -i 's/grafana_password: .*/grafana_password: ${platform.stacklight.grafanaPass}/' " +
+          "${scenariosDir}/${tasks_args_file}; rally --log-file ${resultsDir}/tasks_stacklight.log task start --tag " + tags.join(' ') +
+          " --task ${scenBundle} ${cmd_rally_task_args} || true "
+    }
+
+    // prepare scenarios and rally task cmd
+    if (scenarios) {
+      switch (platform['type']) {
+        case 'openstack':
+          def scenBundle = "${resultsDir}/scenarios_${platform.type}.yaml"
+          cmd_rally_start = bundle_up_scenarios(
+              scenariosDir + '/' + scenarios,
+              skip_list,
+              scenBundle,
+          )
+          cmd_rally_start += "rally --log-file ${resultsDir}/tasks_openstack.log task start --tag " + tags.join(' ') +
+              " --task ${scenBundle} ${cmd_rally_task_args} || true; "
+        break
+        // due to the bug in Rally threads, K8S plugin gets stuck on big all-in-one scenarios
+        // so we have to feed them separately for K8S case
+        case 'k8s':
+          cmd_rally_start = 'for task in $(' +
+              bundle_up_scenarios(scenariosDir + '/' + scenarios, skip_list) + '); do ' +
+              "rally --log-file ${resultsDir}/tasks_k8s.log task start --tag " + tags.join(' ') +
+              ' --task $task ' + cmd_rally_task_args + ' || true; done; '
         break
       }
+    } else {
+      if (! cmd_rally_stacklight) {
+        throw new Exception("No scenarios found to run Rally on")
+      }
     }
-    cmd_rally_report= "rally task export --type junit-xml --to ${dest_folder}/report-rally.xml; " +
-        "rally task report --out ${dest_folder}/report-rally.html"
-    full_cmd = 'set -xe; ' + cmd_rally_plugins +
-        cmd_rally_init + cmd_rally_checkout +
-        'set +e; ' + cmd_rally_start +
-        cmd_rally_task_args + cmd_rally_stacklight +
-        cmd_rally_report
-    salt.runSaltProcessStep(master, target, 'file.touch', ["${results}/rally.db"])
-    salt.cmdRun(master, target, "chmod 666 ${results}/rally.db")
-    salt.cmdRun(master, target, "docker run -w /home/rally -i --rm --net=host -e ${env_vars} " +
-        "-v ${results}:${dest_folder} " +
-        "-v ${results}/rally.db:/home/rally/data/rally.db " +
-        "--entrypoint /bin/bash ${dockerImageLink} " +
-        "-c \"${full_cmd}\" > ${results}/${output_file}")
-    addFiles(master, target, results, output_dir)
+
+    // compile full rally cmd map
+    def full_cmd = [
+        '001_install_plugins': "sudo pip install --upgrade ${pluginsDir}",
+        '002_init_rally': cmd_rally_init,
+        '003_start_rally': cmd_rally_start ?: "echo no tasks to run",
+        '004_start_rally_stacklight': cmd_rally_stacklight ?: "echo no tasks to run",
+        '005_rally_report': cmd_rally_report ?: "echo no tasks to run",
+    ]
+
+    return full_cmd
+
 }
 
 /**
+ * DEPRECATED
  * Generate test report
  *
  * @param target            Host to run script from
@@ -399,6 +635,8 @@ def generateTestReport(master, target, dockerImageLink, output_dir, results = '/
     def report_file = 'jenkins_test_report.html'
     def salt = new com.mirantis.mk.Salt()
     def common = new com.mirantis.mk.Common()
+    common.errorMsg('You are using deprecated method! This method will be removed')
+    error('You are using deprecated method! This method will be removed')
     def dest_folder = '/opt/devops-qa-tools/generate_test_report/test_results'
     salt.runSaltProcessStep(master, target, 'file.remove', ["${results}"])
     salt.runSaltProcessStep(master, target, 'file.mkdir', ["${results}", "mode=777"])
@@ -434,6 +672,7 @@ def generateTestReport(master, target, dockerImageLink, output_dir, results = '/
 }
 
 /**
+ * DEPRECATED
  * Execute SPT tests
  *
  * @param target            Host to run tests
@@ -444,6 +683,9 @@ def generateTestReport(master, target, dockerImageLink, output_dir, results = '/
  */
 def runSptTests(master, target, dockerImageLink, output_dir, ext_variables = [], results = '/root/qa_results') {
     def salt = new com.mirantis.mk.Salt()
+    def common = new com.mirantis.mk.Common()
+    common.errorMsg('You are using deprecated method! This method will be removed')
+    error('You are using deprecated method! This method will be removed')
     def dest_folder = '/home/rally/qa_results'
     salt.runSaltProcessStep(master, target, 'file.remove', ["${results}"])
     salt.runSaltProcessStep(master, target, 'file.mkdir', ["${results}", "mode=777"])
@@ -484,29 +726,33 @@ def runSptTests(master, target, dockerImageLink, output_dir, ext_variables = [],
  * @param testing_tools_repo    	Repo with testing tools: configuration script, skip-list, etc.
  * @param tempest_repo         		Tempest repo to clone. Can be upstream tempest (default, recommended), your customized tempest in local/remote repo or path inside container. If not specified, tempest will not be configured.
  * @param tempest_endpoint_type         internalURL or adminURL or publicURL to use in tests
- * @param tempest_version	        Version of tempest to use
+ * @param tempest_version	        Version of tempest to use. This value will be just passed to configure.sh script (cvp-configuration repo).
  * @param conf_script_path              Path to configuration script.
  * @param ext_variables                 Some custom extra variables to add into container
+ * @param container_name                Name of container to use
  */
 def configureContainer(master, target, proxy, testing_tools_repo, tempest_repo,
-                       tempest_endpoint_type="internalURL", tempest_version="15.0.0",
-                       conf_script_path="", ext_variables = []) {
+                       tempest_endpoint_type="internalURL", tempest_version="",
+                       conf_script_path="", ext_variables = [], container_name="cvp") {
     def salt = new com.mirantis.mk.Salt()
+    def common = new com.mirantis.mk.Common()
     if (testing_tools_repo != "" ) {
+        workdir = ''
         if (testing_tools_repo.contains('http://') || testing_tools_repo.contains('https://')) {
-            salt.cmdRun(master, target, "docker exec cvp git clone ${testing_tools_repo} cvp-configuration")
+            salt.cmdRun(master, target, "docker exec ${container_name} git clone ${testing_tools_repo} cvp-configuration")
             configure_script = conf_script_path != "" ? conf_script_path : "cvp-configuration/configure.sh"
         }
         else {
             configure_script = testing_tools_repo
+            workdir = ' -w /var/lib/'
         }
         ext_variables.addAll("PROXY=${proxy}", "TEMPEST_REPO=${tempest_repo}",
                              "TEMPEST_ENDPOINT_TYPE=${tempest_endpoint_type}",
                              "tempest_version=${tempest_version}")
-        salt.cmdRun(master, target, "docker exec -e " + ext_variables.join(' -e ') + " cvp bash -c ${configure_script}")
+        salt.cmdRun(master, target, "docker exec -e " + ext_variables.join(' -e ') + " ${workdir} ${container_name} bash -c ${configure_script}")
     }
     else {
-        common.infoMsg("TOOLS_REPO is empty, no confguration is needed for container")
+        common.infoMsg("TOOLS_REPO is empty, no configuration is needed for this container")
     }
 }
 
@@ -522,19 +768,17 @@ def runCVPtempest(master, target, test_pattern="set=smoke", skip_list="", output
     def salt = new com.mirantis.mk.Salt()
     def xml_file = "${output_filename}.xml"
     def html_file = "${output_filename}.html"
-    def log_file = "${output_filename}.log"
     skip_list_cmd = ''
     if (skip_list != '') {
         skip_list_cmd = "--skip-list ${skip_list}"
     }
-    salt.cmdRun(master, target, "docker exec cvp rally verify start --pattern ${test_pattern} ${skip_list_cmd} " +
-                                "--detailed > ${log_file}", false)
-    salt.cmdRun(master, target, "cat ${log_file}")
+    salt.cmdRun(master, target, "docker exec cvp rally verify start --pattern ${test_pattern} ${skip_list_cmd} --detailed")
     salt.cmdRun(master, target, "docker exec cvp rally verify report --type junit-xml --to /home/rally/${xml_file}")
     salt.cmdRun(master, target, "docker exec cvp rally verify report --type html --to /home/rally/${html_file}")
     salt.cmdRun(master, target, "docker cp cvp:/home/rally/${xml_file} ${output_dir}")
     salt.cmdRun(master, target, "docker cp cvp:/home/rally/${html_file} ${output_dir}")
-    return salt.cmdRun(master, target, "docker exec cvp rally verify show | head -5 | tail -1 | awk '{print \$4}'")['return'][0].values()[0].split()[0]
+    return salt.cmdRun(master, target, "docker exec cvp rally verify show | head -5 | tail -1 | " +
+                                       "awk '{print \$4}'")['return'][0].values()[0].split()[0]
 }
 
 /**
@@ -544,18 +788,17 @@ def runCVPtempest(master, target, test_pattern="set=smoke", skip_list="", output
  * @param test_pattern                  Test pattern to run
  * @param scenarios_path                Path to Rally scenarios
  * @param output_dir                    Directory on target host for storing results (containers is not a good place)
+ * @param container_name                Name of container to use
  */
-def runCVPrally(master, target, scenarios_path, output_dir, output_filename="docker-rally") {
+def runCVPrally(master, target, scenarios_path, output_dir, output_filename="docker-rally", container_name="cvp") {
     def salt = new com.mirantis.mk.Salt()
     def xml_file = "${output_filename}.xml"
-    def log_file = "${output_filename}.log"
     def html_file = "${output_filename}.html"
-    salt.cmdRun(master, target, "docker exec cvp rally task start ${scenarios_path} > ${log_file}", false)
-    salt.cmdRun(master, target, "cat ${log_file}")
-    salt.cmdRun(master, target, "docker exec cvp rally task report --out ${html_file}")
-    salt.cmdRun(master, target, "docker exec cvp rally task report --junit --out ${xml_file}")
-    salt.cmdRun(master, target, "docker cp cvp:/home/rally/${xml_file} ${output_dir}")
-    salt.cmdRun(master, target, "docker cp cvp:/home/rally/${html_file} ${output_dir}")
+    salt.cmdRun(master, target, "docker exec ${container_name} rally task start ${scenarios_path}")
+    salt.cmdRun(master, target, "docker exec ${container_name} rally task report --out ${html_file}")
+    salt.cmdRun(master, target, "docker exec ${container_name} rally task report --junit --out ${xml_file}")
+    salt.cmdRun(master, target, "docker cp ${container_name}:/home/rally/${xml_file} ${output_dir}")
+    salt.cmdRun(master, target, "docker cp ${container_name}:/home/rally/${html_file} ${output_dir}")
 }
 
 
@@ -650,7 +893,7 @@ def check_vm_status(master, target, kvm) {
  */
 def get_vip_node(master, target) {
     def salt = new com.mirantis.mk.Salt()
-    def list = salt.runSaltProcessStep(master, "${target}", 'cmd.run', ["ip a | grep global | grep -v brd"])['return'][0]
+    def list = salt.runSaltProcessStep(master, "${target}", 'cmd.run', ["ip a | grep '/32'"])['return'][0]
     for (item in list.keySet()) {
         if (list[item]) {
             return item
@@ -662,10 +905,12 @@ def get_vip_node(master, target) {
  * Find vip on nodes
  *
  * @param target          Host with cvp container
+ * @param container_name  Name of container
+ * @param script_path     Path to cleanup script (inside container)
  */
-def openstack_cleanup(master, target, script_path="/home/rally/cvp-configuration/cleanup.sh") {
+def openstack_cleanup(master, target, container_name="cvp", script_path="/home/rally/cleanup.sh") {
     def salt = new com.mirantis.mk.Salt()
-    salt.runSaltProcessStep(master, "${target}", 'cmd.run', ["docker exec cvp bash -c ${script_path}"])
+    salt.runSaltProcessStep(master, "${target}", 'cmd.run', ["docker exec ${container_name} bash -c ${script_path}"])
 }
 
 
@@ -673,14 +918,12 @@ def openstack_cleanup(master, target, script_path="/home/rally/cvp-configuration
  * Cleanup
  *
  * @param target            Host to run commands
+ * @param name              Name of container to remove
  */
-def runCleanup(master, target) {
+def runCleanup(master, target, name='cvp') {
     def salt = new com.mirantis.mk.Salt()
-    if ( salt.cmdRun(master, target, "docker ps -f name=qa_tools -q", false, null, false)['return'][0].values()[0] ) {
-        salt.cmdRun(master, target, "docker rm -f qa_tools")
-    }
-    if ( salt.cmdRun(master, target, "docker ps -f name=cvp -q", false, null, false)['return'][0].values()[0] ) {
-        salt.cmdRun(master, target, "docker rm -f cvp")
+    if ( salt.cmdRun(master, target, "docker ps -f name=${name} -q", false, null, false)['return'][0].values()[0] ) {
+        salt.cmdRun(master, target, "docker rm -f ${name}")
     }
 }
 /**
@@ -691,7 +934,7 @@ def runCleanup(master, target) {
  * @param repo_url          Repository url to clone
  * @param proxy             Proxy address to use
  */
-def prepareVenv(repo_url, proxy) {
+def prepareVenv(repo_url, proxy, useSystemPackages=false) {
     def python = new com.mirantis.mk.Python()
     repo_name = "${repo_url}".tokenize("/").last()
     if (repo_url.tokenize().size() > 1){
@@ -708,7 +951,7 @@ def prepareVenv(repo_url, proxy) {
     if (proxy != 'offline') {
         withEnv(["HTTPS_PROXY=${proxy}", "HTTP_PROXY=${proxy}", "https_proxy=${proxy}", "http_proxy=${proxy}"]) {
             sh "git clone ${repo_url}"
-            python.setupVirtualenv(path_venv, "python2", [], path_req, true)
+            python.setupVirtualenv(path_venv, "python2", [], path_req, true, useSystemPackages)
         }
     }
     else {

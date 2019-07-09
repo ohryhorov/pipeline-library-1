@@ -1,7 +1,7 @@
 package com.mirantis.mcp
 
-import org.jfrog.hudson.pipeline.types.ArtifactoryServer
-import org.jfrog.hudson.pipeline.types.buildInfo.BuildInfo
+import org.jfrog.hudson.pipeline.common.types.ArtifactoryServer
+import org.jfrog.hudson.pipeline.common.types.buildInfo.BuildInfo
 
 /**
  * Return string of mandatory build properties for binaries
@@ -40,9 +40,10 @@ def getBinaryBuildProperties(ArrayList customProperties) {
  *        which should determine artifact in Artifactory
  * @param onlyLastItem Boolean, return only last URL if true(by default),
  *        else return list of all found artifact URLS
+ * @param repos ArrayList, a list of repositories to search in
  *
  */
-def uriByProperties(String artifactoryURL, LinkedHashMap properties, Boolean onlyLastItem=true) {
+def uriByProperties(String artifactoryURL, LinkedHashMap properties, Boolean onlyLastItem=true, ArrayList repos=[]) {
     def key, value
     def properties_str = ''
     for (int i = 0; i < properties.size(); i++) {
@@ -51,7 +52,13 @@ def uriByProperties(String artifactoryURL, LinkedHashMap properties, Boolean onl
         value = properties.entrySet().toArray()[i].value.trim()
         properties_str += /${key}=${value}&/
     }
-    def search_url = "${artifactoryURL}/api/search/prop?${properties_str}"
+    def repos_str = (repos) ? repos.join(',') : ''
+    def search_url
+    if (repos_str) {
+        search_url = "${artifactoryURL}/api/search/prop?${properties_str}&repos=${repos_str}"
+    } else {
+        search_url = "${artifactoryURL}/api/search/prop?${properties_str}"
+    }
 
     def result = sh(script: /curl -X GET '${search_url}'/,
             returnStdout: true).trim()
@@ -122,6 +129,31 @@ def getPropertiesForArtifact(String artifactUrl) {
     }
     def properties = new groovy.json.JsonSlurperClassic().parseText(result)
     return properties.get("properties")
+}
+
+/**
+ * Check if image with tag exist by provided path
+ * Returns true or false
+ *
+ * @param artifactoryURL String, an URL to Artifactory
+ * @param imageRepo String, path to image to check, includes repo path and image name
+ * @param tag String, tag to check
+ * @param artifactoryCreds String, artifactory creds to use. Optional, default is 'artifactory'
+ */
+def imageExists(String artifactoryURL, String imageRepo, String tag, String artifactoryCreds = 'artifactory') {
+    def url = artifactoryURL + '/v2/' + imageRepo + '/manifest/' + tag
+    def result
+    withCredentials([
+            [$class          : 'UsernamePasswordMultiBinding',
+             credentialsId   : artifactoryCreds,
+             passwordVariable: 'ARTIFACTORY_PASSWORD',
+             usernameVariable: 'ARTIFACTORY_LOGIN']
+    ]) {
+        result = sh(script: "bash -c \"curl -X GET -u ${ARTIFACTORY_LOGIN}:${ARTIFACTORY_PASSWORD} \'${url}\'\"",
+                returnStdout: true).trim()
+    }
+    def properties = new groovy.json.JsonSlurperClassic().parseText(result)
+    return properties.get("errors") ? false : true
 }
 
 /**
@@ -283,4 +315,69 @@ def promoteDockerArtifact(String artifactoryURL, String artifactoryDevRepo,
         sh "bash -c \"curl --fail -u ${ARTIFACTORY_LOGIN}:${ARTIFACTORY_PASSWORD} -H \"Content-Type:application/json\" -X POST -d @${queryFile} ${url}\""
     }
     sh "rm -v ${queryFile}"
+}
+
+/**
+ * Save job artifacts to Artifactory server if available.
+ * Returns link to Artifactory repo, where saved job artifacts.
+ *
+ * @param config LinkedHashMap which contains next parameters:
+ *   @param artifactory String, Artifactory server id
+ *   @param artifactoryRepo String, repo to save job artifacts
+ *   @param buildProps ArrayList, additional props for saved artifacts. Optional, default: []
+ *   @param artifactory_not_found_fail Boolean, whether to fail if provided artifactory
+ *          id is not found or just print warning message. Optional, default: false
+ */
+def uploadJobArtifactsToArtifactory(LinkedHashMap config) {
+    def common = new com.mirantis.mk.Common()
+    def artifactsDescription = ''
+    def artifactoryServer
+    try {
+        artifactoryServer = Artifactory.server(config.get('artifactory'))
+    } catch (Exception e) {
+        if (config.get('artifactory_not_found_fail', false)) {
+            throw e
+        } else {
+            common.warningMsg(e)
+            return "Artifactory server is not found. Can't save artifacts in Artifactory."
+        }
+    }
+    def artifactDir = 'cur_build_artifacts'
+    def user = ''
+    wrap([$class: 'BuildUser']) {
+        user = env.BUILD_USER_ID
+    }
+    dir(artifactDir) {
+        try {
+            unarchive(mapping: ['**/*' : '.'])
+            // Mandatory and additional properties
+            def properties = getBinaryBuildProperties(config.get('buildProps', []) << "buildUser=${user}")
+
+            // Build Artifactory spec object
+            def uploadSpec = """{
+                "files":
+                    [
+                        {
+                            "pattern": "*",
+                            "target": "${config.get('artifactoryRepo')}/",
+                            "flat": false,
+                            "props": "${properties}"
+                        }
+                    ]
+                }"""
+
+            artifactoryServer.upload(uploadSpec, newBuildInfo())
+            def linkUrl = "${artifactoryServer.getUrl()}/artifactory/${config.get('artifactoryRepo')}"
+            artifactsDescription = "Job artifacts uploaded to Artifactory: <a href=\"${linkUrl}\">${linkUrl}</a>"
+        } catch (Exception e) {
+            if (e =~ /no artifacts/) {
+                artifactsDescription = 'Build has no artifacts saved.'
+            } else {
+                throw e
+            }
+        } finally {
+            deleteDir()
+        }
+    }
+    return artifactsDescription
 }

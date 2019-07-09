@@ -1,7 +1,12 @@
 package com.mirantis.mcp
 
+import static org.yaml.snakeyaml.DumperOptions.FlowStyle.BLOCK
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
+
 @Grab(group='org.yaml', module='snakeyaml', version='1.17')
 import org.yaml.snakeyaml.Yaml
+import org.yaml.snakeyaml.DumperOptions
 
 /**
  * https://issues.jenkins-ci.org/browse/JENKINS-26481
@@ -50,7 +55,10 @@ def loadYAML(String data) {
  */
 @NonCPS
 def dumpYAML(Map map) {
-  def yaml = new Yaml()
+  DumperOptions options = new DumperOptions()
+  options.setPrettyFlow(true)
+  options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK)
+  def yaml = new Yaml(options)
   return yaml.dump(map)
 }
 
@@ -199,4 +207,31 @@ def runOnKubernetes(LinkedHashMap config) {
     }
   } //else
 
+}
+
+/**
+ * Compress a string with Gzip and encode result with Base64 encoding,
+ * useful for wire transfer of large text data over text-based protocols like HTTP
+ * @param s string to encode
+ * @return base64-encoded gzipped string
+*/
+def zipBase64(String s){
+    def targetStream = new ByteArrayOutputStream()
+    def zipStream = new GZIPOutputStream(targetStream)
+    zipStream.write(s.getBytes('UTF-8'))
+    zipStream.close()
+    def zippedBytes = targetStream.toByteArray()
+    targetStream.close()
+    return zippedBytes.encodeBase64().toString()
+}
+
+/**
+ * De-compress a base64-encoded gzipped string, reverts result of zipBase64
+ * @param compressed base64-endcoded gzipped string
+ * @return decoded decompressed string
+*/
+def unzipBase64(String compressed){
+    def inflaterStream = new GZIPInputStream(new ByteArrayInputStream(compressed.decodeBase64()))
+    def uncompressedStr = inflaterStream.getText('UTF-8')
+    return uncompressedStr
 }
